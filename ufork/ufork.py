@@ -31,19 +31,21 @@ def fork_and_serve(sock, handle_conn, select=select.select):
 
 
 class ForkPool(object):
-    def __init__(self, handle_conn, size=None):
+    def __init__(self, handle_conn, address, size=None):
         self.handle_conn = handle_conn
         if size is None:
             size = 2 * multiprocessing.cpu_count() + 1
         self.size = size
+        self.address = address
 
     def run(self):
+        sock = socket.bind(self.address)
         workers = {}
         update_times = {}
         while 1:
             #spawn additional workers as needed
             for i in range(self.size - len(workers)):
-                sock, pid = fork_and_serve(self.handle_conn)
+                sock, pid = fork_and_serve(sock, self.handle_conn)
                 workers[pid] = sock
                 update_times[pid] = time.time()
             #check for heartbeats from workers
