@@ -7,8 +7,9 @@ import select
 import multiprocessing #just for cpu_count!
 
 
+TIMEOUT = 10.0
+
 def fork_and_serve(sock, handle_conn, select=select.select):
-    sock.settimeout(1.0)
     stopping = False
     parent, child = socket.socketpair()
     ppid = os.getpid()
@@ -16,10 +17,17 @@ def fork_and_serve(sock, handle_conn, select=select.select):
     if pid:
         return parent, pid
 
+    sock.settimeout(1.0)
+    #TODO: this is a debug hack
+    class Writer(object):
+       def write(self, data): child.send(data)
+    sys.stdout = Writer()
+    sys.stderr = Writer()
+
     while not stopping:
         if not os.path.exists('/proc/'+str(ppid)):
             break
-        child.write('a')
+        child.send('a')
         try:
             conn, addr = sock.accept()
         except socket.timeout:
@@ -39,7 +47,9 @@ class ForkPool(object):
         self.address = address
 
     def run(self):
-        sock = socket.bind(self.address)
+        sock = socket.socket()
+        sock.bind(self.address)
+        sock.listen(5)
         workers = {}
         update_times = {}
         while 1:
@@ -51,11 +61,11 @@ class ForkPool(object):
             #check for heartbeats from workers
             for pid, sock in workers.items():
                 if select.select([sock], [], []):
-                    sock.recv(4096)
+                    print pid, ":", sock.recv(4096)
                     update_times[pid] = time.time()
             #kill workers which seem to have died
             for pid in workers:
-                if time.time() - update_times[pid] > self.timeout:
+                if time.time() - update_times[pid] > TIMEOUT:
                     os.kill(pid)
             #remove processes which no longer exist from workers
             for pid in workers:
@@ -65,7 +75,8 @@ class ForkPool(object):
             time.sleep(1.0)
 
 
-
-
+def test():
+   fp = ForkPool(lambda a,b: sys.stdout.write(repr(a)+" "+repr(b)), ("0.0.0.0", 9876), 1)
+   fp.run()
 
 
