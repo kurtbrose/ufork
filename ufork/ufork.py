@@ -1,10 +1,9 @@
 import os
-import os.path
 import sys
 import time
 import socket
 import select
-import multiprocessing #just for cpu_count!
+from multiprocessing import cpu_count
 
 
 TIMEOUT = 10.0
@@ -25,7 +24,9 @@ def fork_and_serve(sock, handle_conn, select=select.select):
     sys.stderr = Writer()
 
     while not stopping:
-        if not os.path.exists('/proc/'+str(ppid)):
+        try:
+            os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
+        except:
             break
         child.send('a')
         try:
@@ -42,7 +43,7 @@ class ForkPool(object):
     def __init__(self, handle_conn, address, size=None):
         self.handle_conn = handle_conn
         if size is None:
-            size = 2 * multiprocessing.cpu_count() + 1
+            size = 2 * cpu_count() + 1
         self.size = size
         self.address = address
 
@@ -69,10 +70,34 @@ class ForkPool(object):
                     os.kill(pid)
             #remove processes which no longer exist from workers
             for pid in workers:
-                if not os.path.exists('/proc/'+str(pid)):
+                try: #will not send a signal, just check proc exists
+                    os.kill(pid, 0)
+                except: #failure means process no longer exists
                     del workers[pid]
                     del update_times[pid]
             time.sleep(1.0)
+
+
+try:
+    import gevent
+except:
+    pass #gevent worker not defined
+else:
+    from gevent.pywsgi import WSGIHandler
+
+    class GeventServer(object):
+        pass
+
+    class GeventWorker(object):
+        def __init__(self, wsgi_app, concurrent=100):
+            self.concurrent = 100
+            self.wsgi_app = wsgi_app
+
+        def __call__(self, socket, address):
+            if self.concurrent:
+                pass
+            #TODO: server
+            WSGIHandler(socket, address, GeventServer()).handle()
 
 
 def test():
