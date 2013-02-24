@@ -49,6 +49,7 @@ class ForkPool(object):
 
     def run(self):
         sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(self.address)
         sock.listen(5)
         workers = {}
@@ -75,6 +76,9 @@ class ForkPool(object):
                 except: #failure means process no longer exists
                     del workers[pid]
                     del update_times[pid]
+                    #clear zombie processes from OS's process table
+                    os.waitpid(pid)
+                    #TODO: confirm this is the right thing to do
             time.sleep(1.0)
 
 
