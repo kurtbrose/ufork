@@ -2,84 +2,105 @@ import os
 import sys
 import time
 import socket
-import select
 from multiprocessing import cpu_count
-
 
 TIMEOUT = 10.0
 
-def fork_and_serve(sock, handle_conn, select=select.select):
-    stopping = False
-    parent, child = socket.socketpair()
-    ppid = os.getpid()
-    pid = os.fork()
-    if pid:
-        return parent, pid
+class ForkWorker(object):
+    def __init__(self, post_fork, sleep=None):
+        self.post_form = post_fork
+        self.sleep = sleep or time.sleep
+        self.stopping = False
+        self.sock = None
+        self.pid = None
+        self.last_update = time.time()
 
-    sock.settimeout(1.0)
-    #TODO: this is a debug hack
-    class Writer(object):
-       def write(self, data): child.send(data)
-    sys.stdout = Writer()
-    sys.stderr = Writer()
+    def fork_and_run(self):
+        parent, child = socket.socketpair()
+        ppid = os.getpid()
+        pid = os.fork()
+        if pid: #in parent fork
+            self.pid = pid
+            self.sock = parent
+            return
+        #in child fork
+        self.child_close_fds()
+        sys.stdout = SockFile(child)
+        sys.stderr = SockFile(child)
 
-    while not stopping:
+        while not self.stopping:
+            try:
+                os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
+            except:
+                break
+            child.send('\0')
+            self.sleep(1.0)
+        sys.exit()
+
+    def parent_check(self):
         try:
-            os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
+            data = self.sock.recv(4096, socket.MSG_DONTWAIT)
+        except socket.error:
+            pass
+        else:
+            self.last_update = time.time()
+            data = data.replace('\0', '')
+            if data:
+                print self.pid,':',data
+        try: #check that process still exists
+            os.kill(self.pid, 0)
         except:
-            break
-        child.send('a')
-        try:
-            conn, addr = sock.accept()
-        except socket.timeout:
-            conn, addr = None, None
-        if conn:
-            handle_conn(conn, addr)
+            return False
+        if time.time() - self.last_update > TIMEOUT:
+            os.kill(self.pid)
+            return False
+        return True
 
-    sys.exit()
+    def child_close_fds(self):
+        'close fds in the child after forking'
+        pass #TODO
+
+    def __del__(self): #TODO: better place to collect exit info?
+        os.waitpid(self.pid, os.WNOHANG)
 
 
 class ForkPool(object):
-    def __init__(self, handle_conn, address, size=None):
-        self.handle_conn = handle_conn
+    def __init__(self, post_fork, size=None, sleep=None):
+        self.post_fork = post_fork
         if size is None:
             size = 2 * cpu_count() + 1
         self.size = size
-        self.address = address
+        self.sleep = sleep
 
     def run(self):
-        sock = socket.socket()
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(self.address)
-        sock.listen(5)
-        workers = {}
-        update_times = {}
+        #TODO: context manager around workers, so they will exit if main loop breaks?
+        workers = set() #for efficient removal
         while 1:
             #spawn additional workers as needed
             for i in range(self.size - len(workers)):
-                sock, pid = fork_and_serve(sock, self.handle_conn)
-                workers[pid] = sock
-                update_times[pid] = time.time()
+                worker = ForkWorker(self.post_fork, self.sleep)
+                worker.fork_and_run()
+                worker.add(worker)
             #check for heartbeats from workers
-            for pid, sock in workers.items():
-                if select.select([sock], [], []):
-                    print pid, ":", sock.recv(4096)
-                    update_times[pid] = time.time()
-            #kill workers which seem to have died
-            for pid in workers:
-                if time.time() - update_times[pid] > TIMEOUT:
-                    os.kill(pid)
-            #remove processes which no longer exist from workers
-            for pid in workers:
-                try: #will not send a signal, just check proc exists
-                    os.kill(pid, 0)
-                except: #failure means process no longer exists
-                    del workers[pid]
-                    del update_times[pid]
-                    #clear zombie processes from OS's process table
-                    os.waitpid(pid)
-                    #TODO: confirm this is the right thing to do
-            time.sleep(1.0)
+            dead = set()
+            for worker in workers:
+                if not worker.parent_check():
+                    dead.add(worker)
+            workers = workers - dead
+            self.sleep(1.0)
+
+
+class SockFile(object):
+    def __init__(self, sock):
+        self.sock = sock
+
+    def write(self, data):
+        try:
+            self.sock.send(data, socket.MSG_DONTWAIT)
+        except socket.error:
+            pass #TODO: something smarter
+
+    #TODO: more file-functions as needed
 
 
 try:
@@ -87,21 +108,18 @@ try:
 except:
     pass #gevent worker not defined
 else:
-    from gevent.pywsgi import WSGIHandler
+    import gevent.pywsgi 
 
-    class GeventServer(object):
-        pass
+    def serve_wsgi_gevent(wsgi, address):
+        server = gevent.pywsgi.WSGIServer(address, wsgi)
+        server.init_socket()
+        def post_fork():
+            server.start()
+        pool = ForkPool(post_fork)
+        pool.run()
 
-    class GeventWorker(object):
-        def __init__(self, wsgi_app, concurrent=100):
-            self.concurrent = 100
-            self.wsgi_app = wsgi_app
 
-        def __call__(self, socket, address):
-            if self.concurrent:
-                pass
-            #TODO: server
-            WSGIHandler(socket, address, GeventServer()).handle()
+
 
 
 def test():
