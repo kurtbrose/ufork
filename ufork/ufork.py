@@ -119,11 +119,10 @@ else:
         pool.run()
 
 
-
-
-
 def test():
-   fp = ForkPool(lambda a,b: sys.stdout.write(repr(a)+" "+repr(b)), ("0.0.0.0", 9876), 1)
-   fp.run()
 
+    def wsgi_hello(environ, start_response):
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        yield 'Hello World\n'
 
+    serve_wsgi_gevent(wsgi_hello, ('0.0.0.0', 7777))
