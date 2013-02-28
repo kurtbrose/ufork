@@ -8,7 +8,7 @@ TIMEOUT = 10.0
 
 class ForkWorker(object):
     def __init__(self, post_fork, sleep=None):
-        self.post_form = post_fork
+        self.post_fork = post_fork
         self.sleep = sleep or time.sleep
         self.stopping = False
         self.sock = None
@@ -27,6 +27,9 @@ class ForkWorker(object):
         self.child_close_fds()
         sys.stdout = SockFile(child)
         sys.stderr = SockFile(child)
+        os.close(0) #just close stdin for now so it doesnt mess up repl
+
+        self.post_fork()
 
         while not self.stopping:
             try:
@@ -39,6 +42,7 @@ class ForkWorker(object):
 
     def parent_check(self):
         try:
+            print "check"
             data = self.sock.recv(4096, socket.MSG_DONTWAIT)
         except socket.error:
             pass
@@ -70,7 +74,7 @@ class ForkPool(object):
         if size is None:
             size = 2 * cpu_count() + 1
         self.size = size
-        self.sleep = sleep
+        self.sleep = sleep or time.sleep
 
     def run(self):
         #TODO: context manager around workers, so they will exit if main loop breaks?
@@ -80,14 +84,14 @@ class ForkPool(object):
             for i in range(self.size - len(workers)):
                 worker = ForkWorker(self.post_fork, self.sleep)
                 worker.fork_and_run()
-                worker.add(worker)
+                workers.add(worker)
             #check for heartbeats from workers
             dead = set()
             for worker in workers:
                 if not worker.parent_check():
                     dead.add(worker)
             workers = workers - dead
-            self.sleep(1.0)
+            time.sleep(1.0)
 
 
 class SockFile(object):
@@ -113,12 +117,13 @@ else:
 
     def serve_wsgi_gevent(wsgi, address):
         sock = gevent.socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(address)
         sock.listen(128) #TODO: what value?
         server = gevent.pywsgi.WSGIServer(sock, wsgi)
         def post_fork():
             server.start()
-        pool = ForkPool(post_fork)
+        pool = ForkPool(post_fork, sleep=gevent.sleep)
         pool.run()
 
 
@@ -129,3 +134,9 @@ def test():
         yield 'Hello World\n'
 
     serve_wsgi_gevent(wsgi_hello, ('0.0.0.0', 7777))
+
+def hello_print_test():
+    def print_hello():
+        print "hello"
+    pool = ForkPool(print_hello)
+    pool.run()
