@@ -109,10 +109,13 @@ except:
     pass #gevent worker not defined
 else:
     import gevent.pywsgi 
+    import gevent.socket
 
     def serve_wsgi_gevent(wsgi, address):
-        server = gevent.pywsgi.WSGIServer(address, wsgi)
-        server.init_socket()
+        sock = gevent.socket.socket()
+        sock.bind(address)
+        sock.listen(128) #TODO: what value?
+        server = gevent.pywsgi.WSGIServer(sock, wsgi)
         def post_fork():
             server.start()
         pool = ForkPool(post_fork)
