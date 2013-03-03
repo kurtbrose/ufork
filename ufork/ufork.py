@@ -44,7 +44,6 @@ class Worker(object):
 
     def parent_check(self):
         try:
-            print "check"
             data = self.sock.recv(4096, socket.MSG_DONTWAIT)
         except socket.error:
             pass
@@ -145,7 +144,7 @@ class StdinHandler(object):
             self.console.runsource(inp)
 
     def start(self):
-        threading.Thread(target=self._interact)
+        self.read_thread = threading.Thread(target=self._interact)
         self.read_thread.daemon = True
         self.read_thread.start()
 
