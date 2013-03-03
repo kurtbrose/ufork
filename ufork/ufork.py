@@ -3,10 +3,12 @@ import sys
 import time
 import socket
 from multiprocessing import cpu_count
+import threading
+import code
 
 TIMEOUT = 10.0
 
-class ForkWorker(object):
+class Worker(object):
     def __init__(self, post_fork, sleep=None):
         self.post_fork = post_fork
         self.sleep = sleep or time.sleep
@@ -60,6 +62,12 @@ class ForkWorker(object):
             return False
         return True
 
+    def parent_kill(self):
+        try: #kill if proc still alive
+            os.kill(self.pid)
+        except:
+            pass
+
     def child_close_fds(self):
         'close fds in the child after forking'
         pass #TODO
@@ -68,7 +76,7 @@ class ForkWorker(object):
         os.waitpid(self.pid, os.WNOHANG)
 
 
-class ForkPool(object):
+class Arbiter(object):
     def __init__(self, post_fork, size=None, sleep=None):
         self.post_fork = post_fork
         if size is None:
@@ -77,21 +85,36 @@ class ForkPool(object):
         self.sleep = sleep or time.sleep
 
     def run(self):
-        #TODO: context manager around workers, so they will exit if main loop breaks?
         workers = set() #for efficient removal
-        while 1:
-            #spawn additional workers as needed
-            for i in range(self.size - len(workers)):
-                worker = ForkWorker(self.post_fork, self.sleep)
-                worker.fork_and_run()
-                workers.add(worker)
-            #check for heartbeats from workers
-            dead = set()
+        self._install_sig_handlers()
+        self.stdin_handler = StdinHandler(self)
+        self.stdin_handler.start()
+        try:
+            while 1:
+                #spawn additional workers as needed
+                for i in range(self.size - len(workers)):
+                    worker = Worker(self.post_fork, self.sleep)
+                    worker.fork_and_run()
+                    workers.add(worker)
+                #check for heartbeats from workers
+                dead = set()
+                for worker in workers:
+                    if not worker.parent_check():
+                        dead.add(worker)
+                workers = workers - dead
+                time.sleep(1.0)
+        except:
             for worker in workers:
-                if not worker.parent_check():
-                    dead.add(worker)
-            workers = workers - dead
-            time.sleep(1.0)
+                worker.parent_kill()
+            self._remove_sig_handlers()
+            self.stdin_handler.stop()
+            raise #shut down workers if main loop dies
+
+    def _install_sig_handlers(self):
+        pass
+
+    def _remove_sig_handlers(self):
+        pass
 
 
 class SockFile(object):
@@ -106,6 +129,28 @@ class SockFile(object):
 
     #TODO: more file-functions as needed
 
+class StdinHandler(object):
+    'provides command-line interaction for Arbiter'
+    def __init__(self, arbiter):
+        self.arbiter = arbiter
+        self.stopping = False
+        self.read_thread = None
+        context = dict(globals())
+        context['arbiter'] = self.arbiter
+        self.console = code.InteractiveConsole(context)
+
+    def _interact(self):
+        while not self.stopping:
+            inp = self.console.raw_input('ufork>>')
+            self.console.runsource(inp)
+
+    def start(self):
+        threading.Thread(target=self._interact)
+        self.read_thread.daemon = True
+        self.read_thread.start()
+
+    def stop(self):
+        self.stopping = True
 
 try:
     import gevent
@@ -123,8 +168,8 @@ else:
         server = gevent.pywsgi.WSGIServer(sock, wsgi)
         def post_fork():
             server.start()
-        pool = ForkPool(post_fork, sleep=gevent.sleep)
-        pool.run()
+        arbiter = Arbiter(post_fork, sleep=gevent.sleep)
+        arbiter.run()
 
 
 def test():
@@ -138,5 +183,5 @@ def test():
 def hello_print_test():
     def print_hello():
         print "hello"
-    pool = ForkPool(print_hello)
-    pool.run()
+    arbiter = Arbiter(print_hello)
+    arbiter.run()
