@@ -6,6 +6,7 @@ from multiprocessing import cpu_count
 import threading
 import code
 import signal
+from random import seed #re-seed random number generator post-fork
 
 TIMEOUT = 10.0
 
@@ -31,6 +32,7 @@ class Worker(object):
         sys.stdout = SockFile(child)
         sys.stderr = SockFile(child)
         os.close(0) #just close stdin for now so it doesnt mess up repl
+        seed() #re-seed random number generator post-fork
 
         self.post_fork()
 
@@ -78,7 +80,7 @@ class Worker(object):
 
 #signal handling serves two purposes:
 # 1- graceful shutdown of workers when possible
-# 2- worker management
+# 2- worker number management
 SIGNAL_NAMES = ["SIGHUP", "SIGINT", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGTERM",
     "SIGCHLD", "SIGTTIN", "SIGTTOU", "SIGWINCH"]
 
