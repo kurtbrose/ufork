@@ -5,6 +5,7 @@ import socket
 from multiprocessing import cpu_count
 import threading
 import code
+import signal
 
 TIMEOUT = 10.0
 
@@ -75,6 +76,15 @@ class Worker(object):
     def __del__(self): #TODO: better place to collect exit info?
         os.waitpid(self.pid, os.WNOHANG)
 
+#signal handling serves two purposes:
+# 1- graceful shutdown of workers when possible
+# 2- worker management
+SIGNAL_NAMES = ["SIGHUP", "SIGINT", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGTERM",
+    "SIGCHLD", "SIGTTIN", "SIGTTOU", "SIGWINCH"]
+
+SIGNALS = [getattr(signal, e) for e in SIGNAL_NAMES]
+
+STOP_SIGNALS = set([signal.SIGINT, signal.SIGTERM])
 
 class Arbiter(object):
     def __init__(self, post_fork, size=None, sleep=None):
@@ -111,10 +121,14 @@ class Arbiter(object):
             raise #shut down workers if main loop dies
 
     def _install_sig_handlers(self):
-        pass
+        #backup existing signal handlers
+        self.prev_sig_handlers = [(sig, signal.getsignal(sig)) for sig in SIGNALS]
+        
 
     def _remove_sig_handlers(self):
-        pass
+        #restore previous signal handlers
+        for sigcode, handler in self.prev_sig_handlers:
+            signal.signal(sigcode, handler)
 
 
 class SockFile(object):
