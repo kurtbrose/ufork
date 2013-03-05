@@ -11,8 +11,9 @@ from random import seed #re-seed random number generator post-fork
 TIMEOUT = 10.0
 
 class Worker(object):
-    def __init__(self, post_fork, sleep=None):
+    def __init__(self, post_fork, child_pre_exit=lambda: None, sleep=None):
         self.post_fork = post_fork
+        self.child_pre_exit = child_pre_exit
         self.sleep = sleep or time.sleep
         self.stopping = False
         self.sock = None
@@ -36,14 +37,18 @@ class Worker(object):
 
         self.post_fork()
 
-        while not self.stopping:
-            try:
-                os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
-            except:
-                break
-            child.send('\0')
-            self.sleep(1.0)
-        sys.exit()
+        try:
+            while not self.stopping:
+                try:
+                    os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
+                except OSError:
+                    break
+                child.send('\0')
+                self.sleep(1.0)
+        except:
+            self.child_pre_exit()
+            raise
+        self.child_pre_exit()
 
     def parent_check(self):
         try:
@@ -57,7 +62,7 @@ class Worker(object):
                 print self.pid,':',data
         try: #check that process still exists
             os.kill(self.pid, 0)
-        except:
+        except OSError:
             return False
         if time.time() - self.last_update > TIMEOUT:
             os.kill(self.pid)
@@ -74,18 +79,7 @@ class Worker(object):
         'close fds in the child after forking'
         pass #TODO
 
-    def __del__(self): #TODO: better place to collect exit info?
-        os.waitpid(self.pid, os.WNOHANG)
-
-#signal handling serves two purposes:
-# 1- graceful shutdown of workers when possible
-# 2- worker number management
-SIGNAL_NAMES = ["SIGHUP", "SIGINT", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGTERM",
-    "SIGCHLD", "SIGTTIN", "SIGTTOU", "SIGWINCH"]
-
-SIGNALS = [getattr(signal, e) for e in SIGNAL_NAMES]
-
-STOP_SIGNALS = set([signal.SIGINT, signal.SIGTERM])
+#SIGINT and SIGTERM mean shutdown cleanly
 
 class Arbiter(object):
     def __init__(self, post_fork, size=None, sleep=None):
@@ -113,6 +107,10 @@ class Arbiter(object):
                     if not worker.parent_check():
                         dead.add(worker)
                 workers = workers - dead
+                try:
+                    os.waitpid(-1, os.WNOHANG)
+                except OSError:
+                    pass #possible to get Errno 10: No child processes
                 time.sleep(1.0)
         except:
             for worker in workers:
@@ -120,16 +118,6 @@ class Arbiter(object):
             self._remove_sig_handlers()
             self.stdin_handler.stop()
             raise #shut down workers if main loop dies
-
-    def _install_sig_handlers(self):
-        #backup existing signal handlers
-        self.prev_sig_handlers = [(sig, signal.getsignal(sig)) for sig in SIGNALS]
-        
-
-    def _remove_sig_handlers(self):
-        #restore previous signal handlers
-        for sigcode, handler in self.prev_sig_handlers:
-            signal.signal(sigcode, handler)
 
 
 class SockFile(object):
