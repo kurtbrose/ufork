@@ -49,6 +49,7 @@ class Worker(object):
             self.child_pre_exit()
             raise
         self.child_pre_exit()
+        sys.exit(0)
 
     def parent_check(self):
         try:
@@ -77,13 +78,14 @@ class Worker(object):
 
     def child_close_fds(self):
         'close fds in the child after forking'
-        pass #TODO
+        pass #TODO -- figure out which should and shouldn't be closed
 
 #SIGINT and SIGTERM mean shutdown cleanly
 
 class Arbiter(object):
-    def __init__(self, post_fork, size=None, sleep=None):
+    def __init__(self, post_fork, child_pre_exit=None, size=None, sleep=None):
         self.post_fork = post_fork
+        self.child_pre_exit = child_pre_exit
         if size is None:
             size = 2 * cpu_count() + 1
         self.size = size
@@ -98,7 +100,7 @@ class Arbiter(object):
             while 1:
                 #spawn additional workers as needed
                 for i in range(self.size - len(workers)):
-                    worker = Worker(self.post_fork, self.sleep)
+                    worker = Worker(self.post_fork, self.child_pre_exit, self.sleep)
                     worker.fork_and_run()
                     workers.add(worker)
                 #check for heartbeats from workers
@@ -163,15 +165,14 @@ else:
     import gevent.pywsgi 
     import gevent.socket
 
-    def serve_wsgi_gevent(wsgi, address):
+    def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
         sock = gevent.socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(address)
         sock.listen(128) #TODO: what value?
         server = gevent.pywsgi.WSGIServer(sock, wsgi)
-        def post_fork():
-            server.start()
-        arbiter = Arbiter(post_fork, sleep=gevent.sleep)
+        server.stop_timeout = stop_timeout
+        arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop, sleep=gevent.sleep)
         arbiter.run()
 
 
