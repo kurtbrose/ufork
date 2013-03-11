@@ -41,11 +41,13 @@ class Worker(object):
             while not self.stopping:
                 try:
                     os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
-                except OSError:
+                except OSError as e:
+                    print "caught exception5", e
                     break
                 child.send('\0')
                 self.sleep(1.0)
-        except:
+        except Exception as e:
+            print "caught exception4", e
             self.child_pre_exit()
             raise
         self.child_pre_exit()
@@ -63,17 +65,19 @@ class Worker(object):
                 print self.pid,':',data
         try: #check that process still exists
             os.kill(self.pid, 0)
-        except OSError:
+        except OSError as e:
+            print "caught exception1", e
             return False
         if time.time() - self.last_update > TIMEOUT:
-            os.kill(self.pid)
+            self.parent_kill()
             return False
         return True
 
     def parent_kill(self):
         try: #kill if proc still alive
-            os.kill(self.pid)
-        except:
+            os.kill(self.pid, signal.SIGKILL)
+        except OSError as e:
+            print "caught exception2", e
             pass
 
     def child_close_fds(self):
@@ -93,7 +97,6 @@ class Arbiter(object):
 
     def run(self):
         workers = set() #for efficient removal
-        self._install_sig_handlers()
         self.stdin_handler = StdinHandler(self)
         self.stdin_handler.start()
         try:
@@ -111,13 +114,13 @@ class Arbiter(object):
                 workers = workers - dead
                 try:
                     os.waitpid(-1, os.WNOHANG)
-                except OSError:
+                except OSError as e:
+                    print "caught exception3", e
                     pass #possible to get Errno 10: No child processes
                 time.sleep(1.0)
         except:
             for worker in workers:
                 worker.parent_kill()
-            self._remove_sig_handlers()
             self.stdin_handler.stop()
             raise #shut down workers if main loop dies
 
