@@ -183,4 +183,14 @@ else:
         arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop, sleep=gevent.sleep)
         arbiter.run()
 
+def serve_wsgiref_thread(wsgi, host, port):
+    sock = socket.socket()
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((host, port))
+    sock.listen(128) #TODO: better value?
+    raise NotImplementedError("IOU working implementation")
+    #arbiter = Arbiter(post_fork=, child_pre_exit=)
+    arbiter.run()
+
+
 LAST_ARBITER = None

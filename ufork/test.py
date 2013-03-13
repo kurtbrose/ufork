@@ -7,7 +7,7 @@ def test_wsgi_hello():
     def test_control():
         time.sleep(3) #give the server time to start up
         try:
-            assert urllib2.urlopen('127.0.0.1:7777').read() == 'Hello World\n'
+            assert urllib2.urlopen('http://127.0.0.1:7777').read() == 'Hello World\n'
         finally:
             ufork.LAST_ARBITER.stopping = True
     test_thread = threading.Thread(target=test_control)
