@@ -184,13 +184,15 @@ else:
         arbiter.run()
 
 def serve_wsgiref_thread(wsgi, host, port):
-    sock = socket.socket()
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((host, port))
-    sock.listen(128) #TODO: better value?
-    raise NotImplementedError("IOU working implementation")
-    #arbiter = Arbiter(post_fork=, child_pre_exit=)
+    'probably not suitable for production use'
+    import wsgiref.simple_server
+    httpd = wsgiref.simple_server.make_server(host, port, wsgi)
+    httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    def start_server():
+        server_thread = threading.Thread(target=httpd.serve_forever)
+        server_thread.daemon=True
+        server_thread.start()
+    arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown)
     arbiter.run()
-
 
 LAST_ARBITER = None
