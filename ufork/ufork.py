@@ -153,9 +153,11 @@ class StdinHandler(object):
         self.console = code.InteractiveConsole(context)
 
     def _interact(self):
+        print '' #newline on startup to clear prompt
         while not self.stopping:
-            inp = self.console.raw_input('ufork>>')
+            inp = self.console.raw_input('ufork>> ')
             self.console.runsource(inp)
+        print '' #newline after done to clear prompt
 
     def start(self):
         self.read_thread = threading.Thread(target=self._interact)
