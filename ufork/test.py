@@ -10,9 +10,11 @@ def test_wsgi_hello():
     server_thread.daemon = True
     server_thread.start()
     time.sleep(3) #give the server time to start up
-    assert urllib2.urlopen('127.0.0.1:7777').read() == 'Hello World\n'
-    ufork.LAST_ARBITER.stopping = True
-    server_thread.join()
+    try:
+        assert urllib2.urlopen('127.0.0.1:7777').read() == 'Hello World\n'
+    finally:
+        ufork.LAST_ARBITER.stopping = True
+        server_thread.join()
 
 def hello_print_test():
     def print_hello():

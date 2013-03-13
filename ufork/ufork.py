@@ -102,7 +102,7 @@ class Arbiter(object):
         self.stdin_handler = StdinHandler(self)
         self.stdin_handler.start()
         self.stopping = False #for manual stopping
-        dead_workers = self.dead_workers = deque
+        dead_workers = self.dead_workers = deque()
         try:
             while not self.stopping:
                 #spawn additional workers as needed
