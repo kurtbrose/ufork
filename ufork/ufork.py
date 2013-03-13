@@ -85,6 +85,9 @@ class Worker(object):
         'close fds in the child after forking'
         pass #TODO -- figure out which should and shouldn't be closed
 
+    def __repr__(self):
+        return "ufork.Worker<pid="+str(self.pid)+">"
+
 #SIGINT and SIGTERM mean shutdown cleanly
 
 class Arbiter(object):
@@ -117,10 +120,11 @@ class Arbiter(object):
                     if not worker.parent_check():
                         dead.add(worker)
                 workers = workers - dead
-                try:
+                try: #reap dead workers
                     res = os.waitpid(-1, os.WNOHANG)
-                    if res != (0,0):
+                    while res != (0,0):
                         dead_workers.append(res)
+                        res = os.waitpid(-1, os.WNOHANG)
                 except OSError as e:
                     print "caught exception3", e
                     pass #possible to get Errno 10: No child processes
