@@ -4,17 +4,16 @@ import urllib2
 import time
 
 def test_wsgi_hello():
-    server_thread = threading.Thread(
-        target=ufork.serve_wsgi_gevent, 
-        args=(wsgi_hello, ('0.0.0.0', 7777)))
-    server_thread.daemon = True
-    server_thread.start()
-    time.sleep(3) #give the server time to start up
-    try:
-        assert urllib2.urlopen('127.0.0.1:7777').read() == 'Hello World\n'
-    finally:
-        ufork.LAST_ARBITER.stopping = True
-        server_thread.join()
+    def test_control():
+        time.sleep(3) #give the server time to start up
+        try:
+            assert urllib2.urlopen('127.0.0.1:7777').read() == 'Hello World\n'
+        finally:
+            ufork.LAST_ARBITER.stopping = True
+    test_thread = threading.Thread(target=test_control)
+    test_thread.daemon = True
+    test_thread.start()
+    ufork.serve_wsgi_gevent(wsgi_hello, ('0.0.0.0', 7777))
 
 def hello_print_test():
     def print_hello():

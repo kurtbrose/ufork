@@ -95,6 +95,7 @@ class Arbiter(object):
             size = 2 * cpu_count() + 1
         self.size = size
         self.sleep = sleep or time.sleep
+        global LAST_ARBITER
         LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
     def run(self):
