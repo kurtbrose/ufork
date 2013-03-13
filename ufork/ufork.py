@@ -7,6 +7,7 @@ import threading
 import code
 import signal
 from random import seed #re-seed random number generator post-fork
+from collections import deque
 
 TIMEOUT = 10.0
 
@@ -94,13 +95,16 @@ class Arbiter(object):
             size = 2 * cpu_count() + 1
         self.size = size
         self.sleep = sleep or time.sleep
+        LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
     def run(self):
-        workers = set() #for efficient removal
+        workers = self.workers = set() #for efficient removal
         self.stdin_handler = StdinHandler(self)
         self.stdin_handler.start()
+        self.stopping = False #for manual stopping
+        dead_workers = self.dead_workers = deque
         try:
-            while 1:
+            while not self.stopping:
                 #spawn additional workers as needed
                 for i in range(self.size - len(workers)):
                     worker = Worker(self.post_fork, self.child_pre_exit, self.sleep)
@@ -113,7 +117,7 @@ class Arbiter(object):
                         dead.add(worker)
                 workers = workers - dead
                 try:
-                    os.waitpid(-1, os.WNOHANG)
+                    dead_workers.append(os.waitpid(-1, os.WNOHANG))
                 except OSError as e:
                     print "caught exception3", e
                     pass #possible to get Errno 10: No child processes
@@ -178,17 +182,4 @@ else:
         arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop, sleep=gevent.sleep)
         arbiter.run()
 
-
-def test():
-
-    def wsgi_hello(environ, start_response):
-        start_response('200 OK', [('Content-Type', 'text/plain')])
-        yield 'Hello World\n'
-
-    serve_wsgi_gevent(wsgi_hello, ('0.0.0.0', 7777))
-
-def hello_print_test():
-    def print_hello():
-        print "hello"
-    arbiter = Arbiter(print_hello)
-    arbiter.run()
+LAST_ARBITER = None
