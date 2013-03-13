@@ -1,5 +1,6 @@
 import ufork
 import threading
+import thread
 import urllib2
 import time
 import sys
@@ -45,7 +46,7 @@ def hello_print_test():
 
 def worker_cycle_test():
     arbiter = ufork.Arbiter(post_fork = suicide_worker)
-    arbiter_thread = threading.Thread(target = arbiter.run())
+    arbiter_thread = threading.Thread(target = arbiter.run)
     arbiter_thread.daemon = True
     arbiter_thread.start()
     time.sleep(6) #give some time for workers to die
@@ -66,9 +67,11 @@ def worker_cycle_test():
     
 
 def suicide_worker():
+    print "suicide worker started"
     def die_soon():
         time.sleep(2)
-        sys.exit(0)
+        print "suicide worker dieing"
+        thread.interrupt_main() #sys.exit(0)
     suicide_thread = threading.Thread(target=die_soon)
     suicide_thread.daemon = True
     suicide_thread.start()
