@@ -49,9 +49,9 @@ class Worker(object):
                 self.sleep(1.0)
         except Exception as e:
             print "caught exception4", e
-            self.child_pre_exit()
             raise
-        self.child_pre_exit()
+        finally:
+            self.child_pre_exit()
         sys.exit(0)
 
     def parent_check(self):
@@ -101,10 +101,24 @@ class Arbiter(object):
         global LAST_ARBITER
         LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
-    def run(self):
+    def spawn_daemon(self):
+        'causes run to be executed in a newly spawned daemon process'
+        open('out.txt', 'a').close() #TODO: configurable output file
+        if not os.fork():
+            os.setsid() #create anew session (?) TODO: read up on this
+            if os.fork(): #TODO: is setsid + double fork needed?
+                os._exit(0)
+            fd = os.open('out.txt', os.O_RDWR)
+            os.close(0)
+            os.dup2(fd, 1)
+            os.dup2(fd, 2)
+            self.run(False)
+
+    def run(self, repl=True):
         workers = self.workers = set() #for efficient removal
-        self.stdin_handler = StdinHandler(self)
-        self.stdin_handler.start()
+        if repl:
+            self.stdin_handler = StdinHandler(self)
+            self.stdin_handler.start()
         self.stopping = False #for manual stopping
         dead_workers = self.dead_workers = deque()
         try:
@@ -133,7 +147,6 @@ class Arbiter(object):
             for worker in workers:
                 worker.parent_kill()
             self.stdin_handler.stop()
-
 
 class SockFile(object):
     def __init__(self, sock):
@@ -167,6 +180,8 @@ class StdinHandler(object):
         sys.stdout.flush()
 
     def start(self):
+        if self.stopping:
+            raise Exception("StdinHandler is not restartable")
         self.read_thread = threading.Thread(target=self._interact)
         self.read_thread.daemon = True
         self.read_thread.start()
@@ -193,7 +208,7 @@ else:
         arbiter.run()
 
 def serve_wsgiref_thread(wsgi, host, port):
-    'probably not suitable for production use'
+    'probably not suitable for production use; example of threaded server'
     import wsgiref.simple_server
     httpd = wsgiref.simple_server.make_server(host, port, wsgi)
     httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

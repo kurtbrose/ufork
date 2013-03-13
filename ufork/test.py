@@ -3,12 +3,12 @@ import threading
 import thread
 import urllib2
 import time
-import sys
 import os
 
 def regression_test():
     'run all tests that do not require manual intervention'
     test_wsgi_hello()
+    time.sleep(2) #give OS time to refresh TCP socket
     test_wsgiref_hello()
     worker_cycle_test()
 
