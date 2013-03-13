@@ -118,16 +118,17 @@ class Arbiter(object):
                         dead.add(worker)
                 workers = workers - dead
                 try:
-                    dead_workers.append(os.waitpid(-1, os.WNOHANG))
+                    res = os.waitpid(-1, os.WNOHANG)
+                    if res != (0,0):
+                        dead_workers.append(res)
                 except OSError as e:
                     print "caught exception3", e
                     pass #possible to get Errno 10: No child processes
                 time.sleep(1.0)
-        except:
+        finally:
             for worker in workers:
                 worker.parent_kill()
             self.stdin_handler.stop()
-            raise #shut down workers if main loop dies
 
 
 class SockFile(object):
@@ -153,11 +154,13 @@ class StdinHandler(object):
         self.console = code.InteractiveConsole(context)
 
     def _interact(self):
+        sys.stdout.flush()
         print '' #newline on startup to clear prompt
         while not self.stopping:
             inp = self.console.raw_input('ufork>> ')
             self.console.runsource(inp)
         print '' #newline after done to clear prompt
+        sys.stdout.flush()
 
     def start(self):
         self.read_thread = threading.Thread(target=self._interact)
