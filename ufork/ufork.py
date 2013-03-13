@@ -12,9 +12,9 @@ from collections import deque
 TIMEOUT = 10.0
 
 class Worker(object):
-    def __init__(self, post_fork, child_pre_exit=lambda: None, sleep=None):
+    def __init__(self, post_fork, child_pre_exit=None, sleep=None):
         self.post_fork = post_fork
-        self.child_pre_exit = child_pre_exit
+        self.child_pre_exit = child_pre_exit or (lambda: None)
         self.sleep = sleep or time.sleep
         self.stopping = False
         self.sock = None
