@@ -205,7 +205,14 @@ else:
         server = gevent.pywsgi.WSGIServer(sock, wsgi)
         server.stop_timeout = stop_timeout
         arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop, sleep=gevent.sleep)
-        arbiter.run()
+        try:
+            arbiter.run()
+        finally: #TODO: clean shutdown should be 1- stop listening, 2- close socket when accept queue is clear
+            try:
+                sock.close()
+            except socket.error:
+                pass #TODO: log it?
+            
 
 def serve_wsgiref_thread(wsgi, host, port):
     'probably not suitable for production use; example of threaded server'
@@ -217,6 +224,12 @@ def serve_wsgiref_thread(wsgi, host, port):
         server_thread.daemon=True
         server_thread.start()
     arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown)
-    arbiter.run()
+    try:
+        arbiter.run()
+    finally: #TODO: clean shutdown
+        try:
+            httpd.socket.close()
+        except socket.error:
+            pass #TODO: log it?
 
 LAST_ARBITER = None

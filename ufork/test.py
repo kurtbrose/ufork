@@ -4,6 +4,26 @@ import thread
 import urllib2
 import time
 import os
+import weakref
+import socket
+import warnings
+import traceback
+
+SOCK_REGISTRY = weakref.WeakSet()
+
+def _monkey_patch_socket_registry():
+    'for debugging purposes, keep track of all open sockets'
+    old_init = socket.socket.__init__
+    def __init__(self, *a, **kw):
+        old_init(self, *a, **kw)
+        SOCK_REGISTRY.add(self)
+    socket.socket.__init__ = __init__
+
+try:
+    _monkey_patch_socket_registry()
+except:
+    warnings.warn('Could not monkey patch socket, SOCK_REGISTRY not valid:\n' +\
+                  traceback.format_exc())
 
 def regression_test():
     'run all tests that do not require manual intervention'
@@ -37,6 +57,7 @@ def test_wsgiref_hello():
     finally:
         ufork.LAST_ARBITER.stopping = True
     arbiter_thread.join()
+    ufork.LAST_ARBITER = None #so garbage collection can work
 
 def hello_print_test():
     def print_hello():
