@@ -9,9 +9,11 @@ import signal
 from random import seed #re-seed random number generator post-fork
 from collections import deque
 import logging
+from logging.handlers import SysLogHandler
 
 TIMEOUT = 10.0
 
+log = logging.getLogger(__name__)
 
 class Worker(object):
     def __init__(self, post_fork, child_pre_exit=None, sleep=None):
@@ -32,12 +34,15 @@ class Worker(object):
             self.sock = parent
             return
         #in child fork
+        signal.signal(signal.SIGTERM, lambda signal, frame: self.child_stop())
+        pid = os.getpid()
         self.child_close_fds()
         #sys.stdout = SockFile(child)
         #sys.stderr = SockFile(child)
         os.close(0) #just close stdin for now so it doesnt mess up repl
         os.close(1)
         os.close(2)
+        #TODO: should these go to UDP port 514? (syslog)
         #set stdout and stderr filenos to point to the child end of the socket-pair
         os.dup2(child.fileno(), 1)
         os.dup2(child.fileno(), 2)
@@ -48,19 +53,21 @@ class Worker(object):
         self.post_fork()
 
         try:
+            log.info('worker starting '+str(pid))
             while not self.stopping:
                 try:
                     os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
                 except OSError as e:
-                    print "caught exception5", e
+                    log.info("worker parent died "+str(ppid))
                     break
                 child.send('\0')
                 self.sleep(1.0)
         except Exception as e:
-            print "caught exception4", e
+            log.error("worker error "+repr(e))
             raise
         finally:
             self.child_pre_exit()
+        log.info("worker shutting down "+str(pid))
         sys.exit(0)
 
     def parent_check(self):
@@ -76,7 +83,7 @@ class Worker(object):
         try: #check that process still exists
             os.kill(self.pid, 0)
         except OSError as e:
-            print "caught exception1", e
+            log.info("worker died "+str(self.pid))
             return False
         if time.time() - self.last_update > TIMEOUT:
             self.parent_kill()
@@ -89,10 +96,16 @@ class Worker(object):
         except OSError as e:
             print "caught exception2", e
             pass
+        
+    def parent_notify_stop(self):
+        os.kill(self.pid, signal.SIGTERM)
 
     def child_close_fds(self):
         'close fds in the child after forking'
         pass #TODO -- figure out which should and shouldn't be closed
+
+    def child_stop(self):
+        self.stopping = True
 
     def __repr__(self):
         return "ufork.Worker<pid="+str(self.pid)+">"
@@ -123,6 +136,7 @@ class Arbiter(object):
             os.setsid() #break association with terminal via new session id
             if os.fork(): #fork one more layer to ensure child will not reaquire terminal
                 os._exit(0)
+            logging.root.addHandler(SysLogHandler())
             fd = os.open('out.txt', os.O_RDWR)
             os.close(0)
             os.dup2(fd, 1)
@@ -137,37 +151,48 @@ class Arbiter(object):
         self.stopping = False #for manual stopping
         dead_workers = self.dead_workers = deque()
         try:
-            logging.info('starting arbiter '+repr(self))
+            log.info('starting arbiter '+repr(self))
             while not self.stopping:
                 #spawn additional workers as needed
                 for i in range(self.size - len(workers)):
                     worker = Worker(self.post_fork, self.child_pre_exit, self.sleep)
                     worker.fork_and_run()
-                    logging.info('started worker '+str(worker.pid))
+                    log.info('started worker '+str(worker.pid))
                     workers.add(worker)
                 #check for heartbeats from workers
                 dead = set()
                 for worker in workers:
                     if not worker.parent_check():
                         dead.add(worker)
-                        logging.info('worker died '+str(worker.pid))
                 workers = workers - dead
                 try: #reap dead workers
                     res = os.waitpid(-1, os.WNOHANG)
                     while res != (0,0):
-                        logging.info('worker {0} exit status {1}'.format(*res))
+                        log.info('worker {0} exit status {1}'.format(*res))
                         dead_workers.append(res)
                         res = os.waitpid(-1, os.WNOHANG)
                 except OSError as e:
-                    logging.info("reap caught exception"+repr(e))
+                    log.info("reap caught exception"+repr(e))
                     pass #possible to get Errno 10: No child processes
                 time.sleep(1.0)
         finally:
-            logging.info('shutting down arbiter '+repr(self))
+            log.info('shutting down arbiter '+repr(self))
             if self.parent_pre_stop:
                 self.parent_pre_stop()
+            #give workers the opportunity to shut down cleanly
             for worker in workers:
-                worker.parent_kill()
+                worker.parent_notify_stop()
+            shutdown_time = time.time()
+            while workers and time.time() < shutdown_time + TIMEOUT:
+                dead = set()
+                for worker in workers:
+                    if not worker.parent_check():
+                        dead.add(worker)
+                workers = workers - dead
+                time.sleep(1.0)
+            #if workers hace not shut down cleanly by now, kill them
+            for w in workers:
+                w.parent_kill()
             self.stdin_handler.stop() #safe to call even if handler never started
 
 
@@ -251,12 +276,6 @@ def serve_wsgiref_thread(wsgi, host, port):
         httpd.socket.close()
     arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown,
                       parent_pre_stop=close_socket)
-    try:
-        arbiter.run()
-    finally: #TODO: clean shutdown
-        try:
-            httpd.socket.close()
-        except socket.error:
-            pass #TODO: log it?
+    arbiter.run()
 
 LAST_ARBITER = None

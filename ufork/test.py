@@ -11,6 +11,7 @@ import traceback
 import logging
 
 logging.root.setLevel(logging.INFO) #show details during testing
+logging.basicConfig()
 
 SOCK_REGISTRY = weakref.WeakSet()
 
