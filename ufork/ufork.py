@@ -49,7 +49,6 @@ class Worker(object):
         #TODO: prevent blocking when stdout buffer full?
         # (SockFile class provides this behavior)
         seed() #re-seed random number generator post-fork
-
         self.post_fork()
 
         try:
@@ -68,7 +67,7 @@ class Worker(object):
         finally:
             self.child_pre_exit()
         log.info("worker shutting down "+str(pid))
-        sys.exit(0)
+        os._exit(0) #prevent arbiter code from executing in child
 
     def parent_check(self):
         try:
@@ -136,6 +135,7 @@ class Arbiter(object):
             os.setsid() #break association with terminal via new session id
             if os.fork(): #fork one more layer to ensure child will not reaquire terminal
                 os._exit(0)
+            signal.signal(signal.SIGTERM, lambda signal, frame: self.stop())
             logging.root.addHandler(SysLogHandler())
             fd = os.open('out.txt', os.O_RDWR)
             os.close(0)
@@ -159,24 +159,12 @@ class Arbiter(object):
                     worker.fork_and_run()
                     log.info('started worker '+str(worker.pid))
                     workers.add(worker)
-                #check for heartbeats from workers
-                dead = set()
-                for worker in workers:
-                    if not worker.parent_check():
-                        dead.add(worker)
-                workers = workers - dead
-                try: #reap dead workers
-                    res = os.waitpid(-1, os.WNOHANG)
-                    while res != (0,0):
-                        log.info('worker {0} exit status {1}'.format(*res))
-                        dead_workers.append(res)
-                        res = os.waitpid(-1, os.WNOHANG)
-                except OSError as e:
-                    log.info("reap caught exception"+repr(e))
-                    pass #possible to get Errno 10: No child processes
+                self._cull_workers()
+                self._reap()
                 time.sleep(1.0)
         finally:
-            log.info('shutting down arbiter '+repr(self))
+            log.info('shutting down arbiter '+repr(self)+\
+                     repr(threading.current_thread())+"N:{0} t:{1}".format(os.getpid(),time.time()%1))
             if self.parent_pre_stop:
                 self.parent_pre_stop()
             #give workers the opportunity to shut down cleanly
@@ -184,16 +172,34 @@ class Arbiter(object):
                 worker.parent_notify_stop()
             shutdown_time = time.time()
             while workers and time.time() < shutdown_time + TIMEOUT:
-                dead = set()
-                for worker in workers:
-                    if not worker.parent_check():
-                        dead.add(worker)
-                workers = workers - dead
+                self._cull_workers()
                 time.sleep(1.0)
-            #if workers hace not shut down cleanly by now, kill them
+            #if workers have not shut down cleanly by now, kill them
             for w in workers:
                 w.parent_kill()
+            self._reap()
             self.stdin_handler.stop() #safe to call even if handler never started
+
+    def _cull_workers(self): #remove workers which have died from self.workers
+        dead = set()
+        for worker in self.workers:
+            if not worker.parent_check():
+                dead.add(worker)
+        self.workers = self.workers - dead
+
+    def _reap(self):
+        try: #reap dead workers to avoid filling up OS process table
+            res = os.waitpid(-1, os.WNOHANG)
+            while res != (0,0):
+                log.info('worker {0} exit status {1}'.format(*res))
+                self.dead_workers.append(res)
+                res = os.waitpid(-1, os.WNOHANG)
+        except OSError as e:
+            log.info("reap caught exception"+repr(e))
+            pass #possible to get Errno 10: No child processes
+
+    def stop(self):
+        self.stopping = True
 
 
 class SockFile(object):
