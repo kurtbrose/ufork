@@ -166,7 +166,7 @@ class Arbiter(object):
             log.info('shutting down arbiter '+repr(self)+\
                      repr(threading.current_thread())+"N:{0} t:{1}".format(os.getpid(),time.time()%1))
             if self.parent_pre_stop:
-                self.parent_pre_stop()
+                self.parent_pre_stop() #hope this doesn't error
             #give workers the opportunity to shut down cleanly
             for worker in workers:
                 worker.parent_notify_stop()
@@ -259,14 +259,11 @@ else:
         sock.listen(128) #TODO: what value?
         server = gevent.pywsgi.WSGIServer(sock, wsgi)
         server.stop_timeout = stop_timeout
-        arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop, sleep=gevent.sleep)
-        try:
-            arbiter.run()
-        finally: #TODO: clean shutdown should be 1- stop listening, 2- close socket when accept queue is clear
-            try:
-                sock.close()
-            except socket.error:
-                pass #TODO: log it?
+        def close_socket():
+            sock.close()
+        arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop,
+                          parent_pre_stop=close_socket, sleep=gevent.sleep)
+        arbiter.run()
             
 
 def serve_wsgiref_thread(wsgi, host, port):
