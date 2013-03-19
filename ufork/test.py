@@ -8,6 +8,9 @@ import weakref
 import socket
 import warnings
 import traceback
+import logging
+
+logging.root.setLevel(logging.INFO) #show details during testing
 
 SOCK_REGISTRY = weakref.WeakSet()
 
@@ -58,6 +61,21 @@ def test_wsgiref_hello():
         ufork.LAST_ARBITER.stopping = True
     arbiter_thread.join()
     ufork.LAST_ARBITER = None #so garbage collection can work
+
+def daemon_print_test():
+    try:
+        os.unlink('out.txt')
+        print "removed previous tests out.txt"
+    except OSError:
+        pass
+    def print_hello():
+        print "hello from", os.getpid()
+    arbiter = ufork.Arbiter(print_hello)
+    arbiter.spawn_daemon()
+    time.sleep(1.0)
+    
+    
+    
 
 def hello_print_test():
     def print_hello():

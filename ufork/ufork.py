@@ -8,8 +8,10 @@ import code
 import signal
 from random import seed #re-seed random number generator post-fork
 from collections import deque
+import logging
 
 TIMEOUT = 10.0
+
 
 class Worker(object):
     def __init__(self, post_fork, child_pre_exit=None, sleep=None):
@@ -31,9 +33,16 @@ class Worker(object):
             return
         #in child fork
         self.child_close_fds()
-        sys.stdout = SockFile(child)
-        sys.stderr = SockFile(child)
+        #sys.stdout = SockFile(child)
+        #sys.stderr = SockFile(child)
         os.close(0) #just close stdin for now so it doesnt mess up repl
+        os.close(1)
+        os.close(2)
+        #set stdout and stderr filenos to point to the child end of the socket-pair
+        os.dup2(child.fileno(), 1)
+        os.dup2(child.fileno(), 2)
+        #TODO: prevent blocking when stdout buffer full?
+        # (SockFile class provides this behavior)
         seed() #re-seed random number generator post-fork
 
         self.post_fork()
@@ -91,9 +100,11 @@ class Worker(object):
 #SIGINT and SIGTERM mean shutdown cleanly
 
 class Arbiter(object):
-    def __init__(self, post_fork, child_pre_exit=None, size=None, sleep=None):
+    def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
+                 size=None, sleep=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
+        self.parent_pre_stop = parent_pre_stop
         if size is None:
             size = 2 * cpu_count() + 1
         self.size = size
@@ -101,12 +112,16 @@ class Arbiter(object):
         global LAST_ARBITER
         LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
-    def spawn_daemon(self):
+    def spawn_daemon(self, pidfile=None):
         'causes run to be executed in a newly spawned daemon process'
         open('out.txt', 'a').close() #TODO: configurable output file
+        if pidfile:
+            cur_pid = int(open(pidfile).read())
+            if os.kill(cur_pid, 0):
+                raise Exception("arbiter still running with pid:"+str(cur_pid))
         if not os.fork():
-            os.setsid() #create anew session (?) TODO: read up on this
-            if os.fork(): #TODO: is setsid + double fork needed?
+            os.setsid() #break association with terminal via new session id
+            if os.fork(): #fork one more layer to ensure child will not reaquire terminal
                 os._exit(0)
             fd = os.open('out.txt', os.O_RDWR)
             os.close(0)
@@ -122,31 +137,39 @@ class Arbiter(object):
         self.stopping = False #for manual stopping
         dead_workers = self.dead_workers = deque()
         try:
+            logging.info('starting arbiter '+repr(self))
             while not self.stopping:
                 #spawn additional workers as needed
                 for i in range(self.size - len(workers)):
                     worker = Worker(self.post_fork, self.child_pre_exit, self.sleep)
                     worker.fork_and_run()
+                    logging.info('started worker '+str(worker.pid))
                     workers.add(worker)
                 #check for heartbeats from workers
                 dead = set()
                 for worker in workers:
                     if not worker.parent_check():
                         dead.add(worker)
+                        logging.info('worker died '+str(worker.pid))
                 workers = workers - dead
                 try: #reap dead workers
                     res = os.waitpid(-1, os.WNOHANG)
                     while res != (0,0):
+                        logging.info('worker {0} exit status {1}'.format(*res))
                         dead_workers.append(res)
                         res = os.waitpid(-1, os.WNOHANG)
                 except OSError as e:
-                    print "caught exception3", e
+                    logging.info("reap caught exception"+repr(e))
                     pass #possible to get Errno 10: No child processes
                 time.sleep(1.0)
         finally:
+            logging.info('shutting down arbiter '+repr(self))
+            if self.parent_pre_stop:
+                self.parent_pre_stop()
             for worker in workers:
                 worker.parent_kill()
-            self.stdin_handler.stop()
+            self.stdin_handler.stop() #safe to call even if handler never started
+
 
 class SockFile(object):
     def __init__(self, sock):
@@ -159,6 +182,7 @@ class SockFile(object):
             pass #TODO: something smarter
 
     #TODO: more file-functions as needed
+
 
 class StdinHandler(object):
     'provides command-line interaction for Arbiter'
@@ -223,7 +247,10 @@ def serve_wsgiref_thread(wsgi, host, port):
         server_thread = threading.Thread(target=httpd.serve_forever)
         server_thread.daemon=True
         server_thread.start()
-    arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown)
+    def close_socket():
+        httpd.socket.close()
+    arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown,
+                      parent_pre_stop=close_socket)
     try:
         arbiter.run()
     finally: #TODO: clean shutdown
