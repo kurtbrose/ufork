@@ -10,6 +10,7 @@ from random import seed #re-seed random number generator post-fork
 from collections import deque
 import logging
 from logging.handlers import SysLogHandler
+import traceback
 
 TIMEOUT = 10.0
 
@@ -93,11 +94,13 @@ class Worker(object):
         try: #kill if proc still alive
             os.kill(self.pid, signal.SIGKILL)
         except OSError as e:
-            print "caught exception2", e
-            pass
+            print "SIGKILL exception:", e
         
     def parent_notify_stop(self):
-        os.kill(self.pid, signal.SIGTERM)
+        try:
+            os.kill(self.pid, signal.SIGTERM)
+        except OSError as e:
+            print "SIGTERM exception:", e
 
     def child_close_fds(self):
         'close fds in the child after forking'
@@ -144,7 +147,7 @@ class Arbiter(object):
             self.run(False)
 
     def run(self, repl=True):
-        workers = self.workers = set() #for efficient removal
+        self.workers = set() #for efficient removal
         if repl:
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
@@ -154,31 +157,35 @@ class Arbiter(object):
             log.info('starting arbiter '+repr(self))
             while not self.stopping:
                 #spawn additional workers as needed
-                for i in range(self.size - len(workers)):
+                for i in range(self.size - len(self.workers)):
                     worker = Worker(self.post_fork, self.child_pre_exit, self.sleep)
                     worker.fork_and_run()
                     log.info('started worker '+str(worker.pid))
-                    workers.add(worker)
+                    self.workers.add(worker)
                 self._cull_workers()
                 self._reap()
                 time.sleep(1.0)
         finally:
-            log.info('shutting down arbiter '+repr(self)+\
-                     repr(threading.current_thread())+"N:{0} t:{1}".format(os.getpid(),time.time()%1))
-            if self.parent_pre_stop:
-                self.parent_pre_stop() #hope this doesn't error
-            #give workers the opportunity to shut down cleanly
-            for worker in workers:
-                worker.parent_notify_stop()
-            shutdown_time = time.time()
-            while workers and time.time() < shutdown_time + TIMEOUT:
-                self._cull_workers()
-                time.sleep(1.0)
-            #if workers have not shut down cleanly by now, kill them
-            for w in workers:
-                w.parent_kill()
-            self._reap()
-            self.stdin_handler.stop() #safe to call even if handler never started
+            try:
+                log.info('shutting down arbiter '+repr(self)+\
+                         repr(threading.current_thread())+"N:{0} t:{1}".format(os.getpid(),time.time()%1))
+                if self.parent_pre_stop:
+                    self.parent_pre_stop() #hope this doesn't error
+                #give workers the opportunity to shut down cleanly
+                for worker in self.workers:
+                    worker.parent_notify_stop()
+                shutdown_time = time.time()
+                while self.workers and time.time() < shutdown_time + TIMEOUT:
+                    self._cull_workers()
+                    time.sleep(1.0)
+                #if workers have not shut down cleanly by now, kill them
+                for w in self.workers:
+                    w.parent_kill()
+                self._reap()
+            except:
+                log.error("warning, arbiter shutdown had exception: "+traceback.format_exc())
+            finally:
+                self.stdin_handler.stop() #safe to call even if handler never started
 
     def _cull_workers(self): #remove workers which have died from self.workers
         dead = set()
@@ -195,8 +202,10 @@ class Arbiter(object):
                 self.dead_workers.append(res)
                 res = os.waitpid(-1, os.WNOHANG)
         except OSError as e:
-            log.info("reap caught exception"+repr(e))
-            pass #possible to get Errno 10: No child processes
+            if getattr(e, "errno", None) == 10: #errno 10 is "no child processes"
+                log.info("all workers dead")
+            else:
+                log.info("reap caught exception"+repr(e))
 
     def stop(self):
         self.stopping = True
