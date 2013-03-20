@@ -56,7 +56,7 @@ class Worker(object):
             log.info('worker starting '+str(pid))
             while not self.stopping:
                 try:
-                    os.kill(ppid, 0) #kill 0 sends no signal, but checks that process exists
+                    os.kill(ppid, 0) #check parent process exists
                 except OSError as e:
                     log.info("worker parent died "+str(ppid))
                     break
@@ -167,8 +167,7 @@ class Arbiter(object):
                 time.sleep(1.0)
         finally:
             try:
-                log.info('shutting down arbiter '+repr(self)+\
-                         repr(threading.current_thread())+"N:{0} t:{1}".format(os.getpid(),time.time()%1))
+                log.info('shutting down arbiter '+repr(self))
                 if self.parent_pre_stop:
                     self.parent_pre_stop() #hope this doesn't error
                 #give workers the opportunity to shut down cleanly
@@ -198,8 +197,10 @@ class Arbiter(object):
         try: #reap dead workers to avoid filling up OS process table
             res = os.waitpid(-1, os.WNOHANG)
             while res != (0,0):
-                log.info('worker {0} exit status {1}'.format(*res))
-                self.dead_workers.append(res)
+                name = EXIT_CODE_NAMES.get(res[1])
+                log.info('worker {0} exit status {1} ({2})'.format(
+                    res[0], res[1], name))
+                self.dead_workers.append((res[0], res[1], name))
                 res = os.waitpid(-1, os.WNOHANG)
         except OSError as e:
             if getattr(e, "errno", None) == 10: #errno 10 is "no child processes"
@@ -209,6 +210,14 @@ class Arbiter(object):
 
     def stop(self):
         self.stopping = True
+
+EXIT_CODE_NAMES = {}
+def _init_exit_code_names():
+    import posix
+    for name in [a for a in dir(posix) if "EX_" in a]:
+        value = getattr(posix, name)
+        EXIT_CODE_NAMES[value] = name
+_init_exit_code_names()
 
 
 class SockFile(object):
