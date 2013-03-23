@@ -17,10 +17,11 @@ TIMEOUT = 10.0
 log = logging.getLogger(__name__)
 
 class Worker(object):
-    def __init__(self, post_fork, child_pre_exit=None, sleep=None):
+    def __init__(self, post_fork, child_pre_exit=None, sleep=None, fork=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit or (lambda: None)
         self.sleep = sleep or time.sleep
+        self.fork = fork or os.fork
         self.stopping = False
         self.sock = None
         self.pid = None
@@ -29,7 +30,7 @@ class Worker(object):
     def fork_and_run(self):
         parent, child = socket.socketpair()
         ppid = os.getpid()
-        pid = os.fork()
+        pid = self.fork()
         if pid: #in parent fork
             self.pid = pid
             self.sock = parent
@@ -116,7 +117,7 @@ class Worker(object):
 
 class Arbiter(object):
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
-                 size=None, sleep=None):
+                 size=None, sleep=None, fork=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -124,6 +125,7 @@ class Arbiter(object):
             size = 2 * cpu_count() + 1
         self.size = size
         self.sleep = sleep or time.sleep
+        self.fork = fork or os.fork
         global LAST_ARBITER
         LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
@@ -158,7 +160,7 @@ class Arbiter(object):
             while not self.stopping:
                 #spawn additional workers as needed
                 for i in range(self.size - len(self.workers)):
-                    worker = Worker(self.post_fork, self.child_pre_exit, self.sleep)
+                    worker = Worker(self.post_fork, self.child_pre_exit, self.sleep, self.fork)
                     worker.fork_and_run()
                     log.info('started worker '+str(worker.pid))
                     self.workers.add(worker)
@@ -280,7 +282,8 @@ else:
         def close_socket():
             sock.close()
         arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop,
-                          parent_pre_stop=close_socket, sleep=gevent.sleep)
+                          parent_pre_stop=close_socket, sleep=gevent.sleep,
+                          fork=gevent.fork)
         arbiter.run()
             
 
