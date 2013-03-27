@@ -46,6 +46,7 @@ class Worker(object):
         os.close(2)
         #TODO: should these go to UDP port 514? (syslog)
         #set stdout and stderr filenos to point to the child end of the socket-pair
+        os.dup2(child.fileno(), 0)
         os.dup2(child.fileno(), 1)
         os.dup2(child.fileno(), 2)
         #TODO: prevent blocking when stdout buffer full?
@@ -109,6 +110,10 @@ class Worker(object):
 
     def child_stop(self):
         self.stopping = True
+
+    def send(self, data):
+        'send some data down to child process stdin'
+        self.sock.sendall(data)
 
     def __repr__(self):
         return "ufork.Worker<pid="+str(self.pid)+">"
