@@ -41,9 +41,9 @@ class Worker(object):
         self.child_close_fds()
         #sys.stdout = SockFile(child)
         #sys.stderr = SockFile(child)
-        os.close(0) #just close stdin for now so it doesnt mess up repl
-        os.close(1)
-        os.close(2)
+        #os.close(0) #just close stdin for now so it doesnt mess up repl
+        #os.close(1)
+        #os.close(2)
         #TODO: should these go to UDP port 514? (syslog)
         #set stdout and stderr filenos to point to the child end of the socket-pair
         os.dup2(child.fileno(), 0)

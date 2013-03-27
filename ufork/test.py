@@ -4,6 +4,7 @@ import thread
 import urllib2
 import time
 import os
+import sys
 import weakref
 import socket
 import warnings
@@ -122,3 +123,47 @@ def wsgi_hello(environ, start_response):
 
 def verify_hello(addr):
     assert urllib2.urlopen('http://'+addr).read() == 'Hello World\n'
+
+#start up an arbiter to mess around & test in
+def start():
+    ufork.serve_wsgi_gevent(wsgi_hello, ('0.0.0.0', 7777))
+
+def echo_worker():
+   print "echo worker-",
+   def echo():
+      print "ready to echo!"
+      while 1:
+         print sys.stdin.readline()
+   echo_thread = threading.Thread(target=echo)
+   print "made thread-",
+   echo_thread.daemon = True
+   print "starting-",
+   echo_thread.start()
+
+def chatty_worker():
+   def chat():
+      while 1:
+         print "hello"
+         time.sleep(2)
+   chat_thread = threading.Thread(target=chat)
+   chat_thread.daemon = True
+   chat_thread.start()
+
+def run_echo():
+   arb = ufork.Arbiter(post_fork=echo_worker)
+   arb.run()
+
+def run_chat():
+   arb = ufork.Arbiter(post_fork=chatty_worker)
+   arb.run()
+
+
+def redirect_fork_test():
+    parent, child = socket.socketpair()
+    if os.fork():
+        return parent
+    os.dup2(child.fileno(), 0)
+    os.dup2(child.fileno(), 1)
+    os.dup2(child.fileno(), 2)
+
+
