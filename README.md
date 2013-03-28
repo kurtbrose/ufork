@@ -1,7 +1,7 @@
-ufork
+uFork
 =====
 
-a small, lightweight pre-forking container
+a lightweight, pure python, pre-forking container
 
 Features:
 
@@ -30,3 +30,14 @@ ufork>>^CTraceback (most recent call last):
 KeyboardInterrupt
 >>> 
 ```
+
+Why uFork?
+==========
+
+Why was uFork written, and why should you consider using it?
+
+uFork was written because existing WSGI containers make it difficult to control process lifetime and socket behavior.  To address this, uFork puts maximum control in the hands of the library user.
+
+The basic API is an Arbiter object, which must be initialized with a post-fork function.  The arbiter does not know about sockets, doesn't know or care how the process was started.  In fact, the arbiter can even be run from the Python REPL.
+
+Another primary goal of uFork is to provide high visibility into running processes.
