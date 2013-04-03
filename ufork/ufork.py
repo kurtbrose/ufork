@@ -138,8 +138,11 @@ class Arbiter(object):
         open('out.txt', 'a').close() #TODO: configurable output file
         if pidfile and os.path.exists(pidfile):
             cur_pid = int(open(pidfile).read())
-            if os.kill(cur_pid, 0):
+            try:
+                os.kill(cur_pid, 0)
                 raise Exception("arbiter still running with pid:"+str(cur_pid))
+            except OSError:
+                pass
         if not os.fork():
             os.setsid() #break association with terminal via new session id
             if os.fork(): #fork one more layer to ensure child will not reaquire terminal
