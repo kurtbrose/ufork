@@ -136,7 +136,7 @@ class Arbiter(object):
     def spawn_daemon(self, pidfile=None):
         'causes run to be executed in a newly spawned daemon process'
         open('out.txt', 'a').close() #TODO: configurable output file
-        if pidfile:
+        if pidfile and os.path.exists(pidfile):
             cur_pid = int(open(pidfile).read())
             if os.kill(cur_pid, 0):
                 raise Exception("arbiter still running with pid:"+str(cur_pid))
@@ -144,6 +144,9 @@ class Arbiter(object):
             os.setsid() #break association with terminal via new session id
             if os.fork(): #fork one more layer to ensure child will not reaquire terminal
                 os._exit(0)
+            if pidfile:
+                with open(pidfile, 'w') as f:
+                    f.write(str(os.getpid()))
             signal.signal(signal.SIGTERM, lambda signal, frame: self.stop())
             logging.root.addHandler(SysLogHandler())
             fd = os.open('out.txt', os.O_RDWR)
