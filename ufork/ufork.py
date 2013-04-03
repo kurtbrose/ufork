@@ -160,6 +160,8 @@ class Arbiter(object):
         if repl:
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
+        else:
+            self.stdin_handler = None
         self.stopping = False #for manual stopping
         self.dead_workers = deque()
         try:
@@ -193,7 +195,8 @@ class Arbiter(object):
             except:
                 log.error("warning, arbiter shutdown had exception: "+traceback.format_exc())
             finally:
-                self.stdin_handler.stop() #safe to call even if handler never started
+                if self.stdin_handler:
+                    self.stdin_handler.stop()
 
     def _cull_workers(self): #remove workers which have died from self.workers
         dead = set()
