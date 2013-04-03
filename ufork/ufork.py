@@ -158,7 +158,7 @@ class Arbiter(object):
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
         self.stopping = False #for manual stopping
-        dead_workers = self.dead_workers = deque()
+        self.dead_workers = deque()
         try:
             log.info('starting arbiter '+repr(self))
             while not self.stopping:
@@ -276,7 +276,8 @@ else:
     import gevent.pywsgi 
     import gevent.socket
 
-    def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
+    #TODO: better as subclass?
+    def gevent_wsgi_arbiter(wsgi, address, stop_timeout=30):
         sock = gevent.socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(address)
@@ -288,10 +289,14 @@ else:
         arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop,
                           parent_pre_stop=close_socket, sleep=gevent.sleep,
                           fork=gevent.fork)
-        arbiter.run()
+        return arbiter
+
+    def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
+        gevent_wsgi_arbiter(wsgi, address, stop_timeout).run()
             
 
-def serve_wsgiref_thread(wsgi, host, port):
+
+def wsgiref_thread_arbiter(wsgi, host, port):
     'probably not suitable for production use; example of threaded server'
     import wsgiref.simple_server
     httpd = wsgiref.simple_server.make_server(host, port, wsgi)
@@ -304,6 +309,9 @@ def serve_wsgiref_thread(wsgi, host, port):
         httpd.socket.close()
     arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown,
                       parent_pre_stop=close_socket)
-    arbiter.run()
+    return arbiter
+
+def serve_wsgiref_thread(wsgi, host, port):
+    wsgiref_thread_arbiter(wsgi, host, port).run()
 
 LAST_ARBITER = None
