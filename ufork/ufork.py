@@ -34,8 +34,10 @@ class Worker(object):
         if pid: #in parent fork
             self.pid = pid
             self.sock = parent
+            child.close()
             return
         #in child fork
+        parent.close()
         signal.signal(signal.SIGTERM, lambda signal, frame: self.child_stop())
         pid = os.getpid()
         self.child_close_fds()
