@@ -168,5 +168,9 @@ def redirect_fork_test():
     os.dup2(child.fileno(), 2)
 
 
-def daemon_test():
-    arb = ufork.gevent_wsgi_arbiter()
+def daemon_test(addr = ("0.0.0.0", 8888)):
+    arb = ufork.gevent_wsgi_arbiter(wsgi_hello, addr)
+    arb.spawn_daemon("test.pid")
+    time.sleep(3.0)
+    verify_hello(addr)
+    
