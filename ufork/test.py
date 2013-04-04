@@ -11,6 +11,10 @@ import warnings
 import traceback
 import logging
 import signal
+try:
+    import gevent
+except:
+     warnings.warn("gevent tests unavailable")
 
 logging.root.setLevel(logging.INFO) #show details during testing
 logging.basicConfig()
