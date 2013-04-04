@@ -10,6 +10,7 @@ import socket
 import warnings
 import traceback
 import logging
+import signal
 
 logging.root.setLevel(logging.INFO) #show details during testing
 logging.basicConfig()
@@ -172,5 +173,7 @@ def daemon_test(addr = ("0.0.0.0", 8888)):
     arb = ufork.gevent_wsgi_arbiter(wsgi_hello, addr)
     arb.spawn_daemon("test.pid")
     time.sleep(3.0)
-    verify_hello(addr)
-    
+    verify_hello("127.0.0.1:"+str(addr[1]))
+    pid = int(open('test.pid').read())
+    os.kill(pid, signal.SIGTERM)
+
