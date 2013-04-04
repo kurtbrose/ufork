@@ -170,8 +170,9 @@ def redirect_fork_test():
 
 
 def daemon_test(addr = ("0.0.0.0", 8888)):
-    arb = ufork.gevent_wsgi_arbiter(wsgi_hello, addr)
-    arb.spawn_daemon("test.pid")
+    if not ufork.spawn_daemon("test.pid"):
+        arb = ufork.gevent_wsgi_arbiter(wsgi_hello, addr)
+        arb.run(False)
     time.sleep(3.0)
     verify_hello("127.0.0.1:"+str(addr[1]))
     pid = int(open('test.pid').read())
