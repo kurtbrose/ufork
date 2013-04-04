@@ -24,11 +24,14 @@ def _monkey_patch_socket_registry():
         SOCK_REGISTRY.add(self)
     socket.socket.__init__ = __init__
 
-try:
-    _monkey_patch_socket_registry()
-except:
-    warnings.warn('Could not monkey patch socket, SOCK_REGISTRY not valid:\n' +\
-                  traceback.format_exc())
+if False:
+    try:
+        _monkey_patch_socket_registry()
+    except:
+        warnings.warn('Could not monkey patch socket, SOCK_REGISTRY not valid:\n' +\
+                      traceback.format_exc())
+
+
 
 def regression_test():
     'run all tests that do not require manual intervention'
@@ -75,8 +78,6 @@ def daemon_print_test():
     arbiter = ufork.Arbiter(print_hello)
     arbiter.spawn_daemon()
     time.sleep(1.0)
-    
-    
     
 
 def hello_print_test():
@@ -167,3 +168,5 @@ def redirect_fork_test():
     os.dup2(child.fileno(), 2)
 
 
+def daemon_test():
+    arb = ufork.gevent_wsgi_arbiter()

@@ -7,7 +7,7 @@ import threading
 import code
 import signal
 from random import seed #re-seed random number generator post-fork
-from collections import deque
+from collections import deque, namedtuple
 import logging
 from logging.handlers import SysLogHandler
 import traceback
@@ -49,8 +49,8 @@ class Worker(object):
         #TODO: prevent blocking when stdout buffer full?
         # (SockFile class provides this behavior)
         seed() #re-seed random number generator post-fork
-	self.stdin_handler = StdinHandler(self)
-	self.stdin_handler.start()
+    	self.stdin_handler = StdinHandler(self)
+    	self.stdin_handler.start()
         self.post_fork()
 
         try:
@@ -135,28 +135,10 @@ class Arbiter(object):
 
     def spawn_daemon(self, pidfile=None):
         'causes run to be executed in a newly spawned daemon process'
-        open('out.txt', 'a').close() #TODO: configurable output file
-        if pidfile and os.path.exists(pidfile):
-            cur_pid = int(open(pidfile).read())
-            try:
-                os.kill(cur_pid, 0)
-                raise Exception("arbiter still running with pid:"+str(cur_pid))
-            except OSError:
-                pass
-        if not os.fork():
-            os.setsid() #break association with terminal via new session id
-            if os.fork(): #fork one more layer to ensure child will not reaquire terminal
-                os._exit(0)
-            if pidfile:
-                with open(pidfile, 'w') as f:
-                    f.write(str(os.getpid()))
-            signal.signal(signal.SIGTERM, lambda signal, frame: self.stop())
-            logging.root.addHandler(SysLogHandler())
-            fd = os.open('out.txt', os.O_RDWR)
-            os.close(0)
-            os.dup2(fd, 1)
-            os.dup2(fd, 2)
-            self.run(False)
+        if spawn_daemon(self.fork, pidfile):
+            return
+        signal.signal(signal.SIGTERM, lambda signal, frame: self.stop())
+        self.run(False)
 
     def run(self, repl=True):
         self.workers = set() #for efficient removal
@@ -198,8 +180,10 @@ class Arbiter(object):
             except:
                 log.error("warning, arbiter shutdown had exception: "+traceback.format_exc())
             finally:
-                if self.stdin_handler:
+                if repl:
                     self.stdin_handler.stop()
+                else:
+                    sys._exit(0) #in case arbiter was daemonized, exit here
 
     def _cull_workers(self): #remove workers which have died from self.workers
         dead = set()
@@ -215,7 +199,7 @@ class Arbiter(object):
                 name = EXIT_CODE_NAMES.get(res[1])
                 log.info('worker {0} exit status {1} ({2})'.format(
                     res[0], res[1], name))
-                self.dead_workers.append((res[0], res[1], name))
+                self.dead_workers.append(DeadWorker(res[0], res[1], name))
                 res = os.waitpid(-1, os.WNOHANG)
         except OSError as e:
             if getattr(e, "errno", None) == 10: #errno 10 is "no child processes"
@@ -225,6 +209,8 @@ class Arbiter(object):
 
     def stop(self):
         self.stopping = True
+
+DeadWorker = namedtuple('dead', 'pid code name')
 
 EXIT_CODE_NAMES = {}
 def _init_exit_code_names():
@@ -246,6 +232,33 @@ class SockFile(object):
             pass #TODO: something smarter
 
     #TODO: more file-functions as needed
+
+def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
+    'causes run to be executed in a newly spawned daemon process'
+    fork = fork or os.fork
+    open(outfile, 'a').close() #TODO: configurable output file
+    if pidfile and os.path.exists(pidfile):
+        cur_pid = int(open(pidfile).read())
+        try:
+            os.kill(cur_pid, 0)
+            raise Exception("arbiter still running with pid:"+str(cur_pid))
+        except OSError:
+            pass
+    if fork(): #return True means we are in parent
+        return True
+    else:
+        os.setsid() #break association with terminal via new session id
+        if fork(): #fork one more layer to ensure child will not re-acquire terminal
+            os._exit(0)
+        if pidfile:
+            with open(pidfile, 'w') as f:
+                f.write(str(os.getpid()))
+        logging.root.addHandler(SysLogHandler())
+        fd = os.open(outfile, os.O_RDWR)
+        os.close(0)
+        os.dup2(fd, 1)
+        os.dup2(fd, 2)
+        return False #return False means we are in daemonized process
 
 
 class StdinHandler(object):
