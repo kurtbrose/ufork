@@ -170,7 +170,7 @@ def redirect_fork_test():
 
 
 def daemon_test(addr = ("0.0.0.0", 8888)):
-    if not ufork.spawn_daemon("test.pid"):
+    if not ufork.spawn_daemon(gevent.fork, "test.pid"):
         arb = ufork.gevent_wsgi_arbiter(wsgi_hello, addr)
         arb.run(False)
     time.sleep(3.0)
