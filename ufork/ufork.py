@@ -263,12 +263,12 @@ def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
 
 class StdinHandler(object):
     'provides command-line interaction for Arbiter'
-    def __init__(self, arbiter):
-        self.arbiter = arbiter
+    def __init__(self, repl_self):
+        self.repl_self = repl_self
         self.stopping = False
         self.read_thread = None
         context = dict(globals())
-        context['arbiter'] = self.arbiter
+        context['self'] = self.repl_self
         self.console = code.InteractiveConsole(context)
 
     def _interact(self):
@@ -298,23 +298,24 @@ else:
     import gevent.pywsgi 
     import gevent.socket
 
-    #TODO: better as subclass?
-    def gevent_wsgi_arbiter(wsgi, address, stop_timeout=30):
-        sock = gevent.socket.socket()
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(address)
-        sock.listen(128) #TODO: what value?
-        server = gevent.pywsgi.WSGIServer(sock, wsgi)
-        server.stop_timeout = stop_timeout
-        def close_socket():
-            sock.close()
-        arbiter = Arbiter(post_fork=server.start, child_pre_exit=server.stop,
-                          parent_pre_stop=close_socket, sleep=gevent.sleep,
-                          fork=gevent.fork)
-        return arbiter
+    class GeventWsgiArbiter(Arbiter):
+        def __init__(self, wsgi, address, stop_timeout=30):
+            self.sock = gevent.socket.socket()
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.address = address
+            self.sock.bind(address)
+            self.sock.listen(128)
+            self.wsgi = wsgi
+            self.server = gevent.pywsgi.WSGIServer(self.sock, wsgi)
+            self.server.stop_timeout = stop_timeout
+
+            Arbiter.__init__(self, post_fork=self.server.start,
+                child_pre_exit=self.server.stop,
+                parent_pre_stop=self.sock.close,
+                sleep=gevent.sleep, fork=gevent.fork)
 
     def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
-        gevent_wsgi_arbiter(wsgi, address, stop_timeout).run()
+        GeventWsgiArbiter(wsgi, address, stop_timeout).run()
             
 
 
