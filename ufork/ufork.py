@@ -308,10 +308,13 @@ else:
             self.wsgi = wsgi
             self.server = gevent.pywsgi.WSGIServer(self.sock, wsgi)
             self.server.stop_timeout = stop_timeout
+            def close_sock():
+                self.sock.close()
+                self.server.socket.close() #TODO: cleaner way to work with gevent?
 
             Arbiter.__init__(self, post_fork=self.server.start,
                 child_pre_exit=self.server.stop,
-                parent_pre_stop=self.sock.close,
+                parent_pre_stop=close_sock,
                 sleep=gevent.sleep, fork=gevent.fork)
 
     def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
