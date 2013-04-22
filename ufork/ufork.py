@@ -121,7 +121,7 @@ class Worker(object):
 
 class Arbiter(object):
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
-                 size=None, sleep=None, fork=None):
+                 size=None, sleep=None, fork=None, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -130,6 +130,7 @@ class Arbiter(object):
         self.size = size
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
+        self.extra = extra #a place to put additional data for CLI
         global LAST_ARBITER
         LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
@@ -321,7 +322,6 @@ else:
         GeventWsgiArbiter(wsgi, address, stop_timeout).run()
             
 
-
 def wsgiref_thread_arbiter(wsgi, host, port):
     'probably not suitable for production use; example of threaded server'
     import wsgiref.simple_server
@@ -339,5 +339,36 @@ def wsgiref_thread_arbiter(wsgi, host, port):
 
 def serve_wsgiref_thread(wsgi, host, port):
     wsgiref_thread_arbiter(wsgi, host, port).run()
+
+
+try:
+    import twisted
+except:
+    pass #twisted fork-reactor not defined
+else:
+    from twisted.internet import reactor
+    from twisted.internet import tcp
+
+    class _DeferredReadPort(tcp.Port):
+        def startReading(self):
+            pass
+
+    class TwistedArbiter(Arbiter):
+        def __init__(self, port, factory, backlog=50, interface=''):
+            self.port = _DeferredReadPort(port, factory, backlog, 
+                interface, reactor)
+            port.startListening() # do everything up to accept() call
+
+            self.arbiter = Arbiter(post_fork=self.post_fork)
+
+        def post_fork(self):
+            tcp.Port.startReading(self.port)
+
+        def run(self):
+            self.arbiter.run()
+
+    def listenTCP(port, factory, backlog=50, interface=''):
+        TwistedArbiter(port, factory, backlog, interface).run()
+
 
 LAST_ARBITER = None
