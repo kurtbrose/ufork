@@ -341,34 +341,4 @@ def serve_wsgiref_thread(wsgi, host, port):
     wsgiref_thread_arbiter(wsgi, host, port).run()
 
 
-try:
-    import twisted
-except:
-    pass #twisted fork-reactor not defined
-else:
-    from twisted.internet import reactor
-    from twisted.internet import tcp
-
-    class _DeferredReadPort(tcp.Port):
-        def startReading(self):
-            pass
-
-    class TwistedArbiter(Arbiter):
-        def __init__(self, port, factory, backlog=50, interface=''):
-            self.port = _DeferredReadPort(port, factory, backlog, 
-                interface, reactor)
-            port.startListening() # do everything up to accept() call
-
-            self.arbiter = Arbiter(post_fork=self.post_fork)
-
-        def post_fork(self):
-            tcp.Port.startReading(self.port)
-
-        def run(self):
-            self.arbiter.run()
-
-    def listenTCP(port, factory, backlog=50, interface=''):
-        TwistedArbiter(port, factory, backlog, interface).run()
-
-
 LAST_ARBITER = None

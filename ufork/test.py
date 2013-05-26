@@ -182,12 +182,3 @@ def daemon_test(addr = ("0.0.0.0", 8888)):
     pid = int(open('test.pid').read())
     os.kill(pid, signal.SIGTERM)
 
-def twisted_test():
-    from twisted.web import server, resource
-    class Echo(resource.Resource):
-        isLeaf = True
-        def render_GET(self, request):
-            print request.content.read()
-    site = server.Site(Echo())
-    arb = ufork.TwistedArbiter(8000, site)
-    arb.run()
