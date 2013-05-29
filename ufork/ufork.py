@@ -136,8 +136,9 @@ class Arbiter(object):
 
     def spawn_thread(self):
         'causes run to be executed in a thread'
-        self.thread = threading.Thread(target=self.run, False)
-        self.run(False)
+        self.thread = threading.Thread(target=self.run, args=(False,))
+        self.thread.daemon = True
+        self.thread.start()
 
     def spawn_daemon(self, pidfile=None):
         'causes run to be executed in a newly spawned daemon process'
