@@ -134,6 +134,11 @@ class Arbiter(object):
         global LAST_ARBITER
         LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
 
+    def spawn_thread(self):
+        'causes run to be executed in a thread'
+        self.thread = threading.Thread(target=self.run, False)
+        self.run(False)
+
     def spawn_daemon(self, pidfile=None):
         'causes run to be executed in a newly spawned daemon process'
         if spawn_daemon(self.fork, pidfile):
@@ -184,7 +189,7 @@ class Arbiter(object):
                 if repl:
                     self.stdin_handler.stop()
                 else:
-                    sys._exit(0) #in case arbiter was daemonized, exit here
+                    os._exit(0) #in case arbiter was daemonized, exit here
 
     def _cull_workers(self): #remove workers which have died from self.workers
         dead = set()
