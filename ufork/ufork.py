@@ -6,7 +6,7 @@ from multiprocessing import cpu_count
 import threading
 import code
 import signal
-from random import seed #re-seed random number generator post-fork
+from random import seed  # re-seed random number generator post-fork
 from collections import deque, namedtuple
 import logging
 from logging.handlers import SysLogHandler
@@ -15,6 +15,7 @@ import traceback
 TIMEOUT = 10.0
 
 log = logging.getLogger(__name__)
+
 
 class Worker(object):
     def __init__(self, post_fork, child_pre_exit=None, sleep=None, fork=None):
@@ -31,7 +32,7 @@ class Worker(object):
         parent, child = socket.socketpair()
         ppid = os.getpid()
         pid = self.fork()
-        if pid: #in parent fork
+        if pid:  # in parent fork
             self.pid = pid
             self.sock = parent
             child.close()
@@ -48,16 +49,16 @@ class Worker(object):
         os.dup2(child.fileno(), 2)
         #TODO: prevent blocking when stdout buffer full?
         # (SockFile class provides this behavior)
-        seed() #re-seed random number generator post-fork
-    	self.stdin_handler = StdinHandler(self)
-    	self.stdin_handler.start()
+        seed()  # re-seed random number generator post-fork
+        self.stdin_handler = StdinHandler(self)
+        self.stdin_handler.start()
         self.post_fork()
 
         try:
             log.info('worker starting '+str(pid))
             while not self.stopping:
                 try:
-                    os.kill(ppid, 0) #check parent process exists
+                    os.kill(ppid, 0)  # check parent process exists
                 except OSError as e:
                     log.info("worker parent died "+str(ppid))
                     break
@@ -69,7 +70,7 @@ class Worker(object):
         finally:
             self.child_pre_exit()
         log.info("worker shutting down "+str(pid))
-        os._exit(0) #prevent arbiter code from executing in child
+        os._exit(0)  # prevent arbiter code from executing in child
 
     def parent_check(self):
         try:
@@ -80,8 +81,8 @@ class Worker(object):
             self.last_update = time.time()
             data = data.replace('\0', '')
             if data:
-                print self.pid,':',data
-        try: #check that process still exists
+                print self.pid, ':', data
+        try:  # check that process still exists
             os.kill(self.pid, 0)
         except OSError as e:
             log.info("worker died "+str(self.pid))
@@ -92,11 +93,11 @@ class Worker(object):
         return True
 
     def parent_kill(self):
-        try: #kill if proc still alive
+        try:  # kill if proc still alive
             os.kill(self.pid, signal.SIGKILL)
         except OSError as e:
             print "SIGKILL exception:", e
-        
+
     def parent_notify_stop(self):
         try:
             os.kill(self.pid, signal.SIGTERM)
@@ -105,7 +106,7 @@ class Worker(object):
 
     def child_close_fds(self):
         'close fds in the child after forking'
-        pass #TODO -- figure out which should and shouldn't be closed
+        pass  # TODO -- figure out which should and shouldn't be closed
 
     def child_stop(self):
         self.stopping = True
@@ -119,6 +120,7 @@ class Worker(object):
 
 #SIGINT and SIGTERM mean shutdown cleanly
 
+
 class Arbiter(object):
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
                  size=None, sleep=None, fork=None, extra=None):
@@ -130,9 +132,9 @@ class Arbiter(object):
         self.size = size
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
-        self.extra = extra #a place to put additional data for CLI
+        self.extra = extra  # a place to put additional data for CLI
         global LAST_ARBITER
-        LAST_ARBITER = self #for testing/debugging, a hook to get a global pointer
+        LAST_ARBITER = self  # for testing/debugging, a hook to get a global pointer
 
     def spawn_thread(self):
         'causes run to be executed in a thread'
@@ -148,13 +150,13 @@ class Arbiter(object):
         self.run(False)
 
     def run(self, repl=True):
-        self.workers = set() #for efficient removal
+        self.workers = set()  # for efficient removal
         if repl:
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
         else:
             self.stdin_handler = None
-        self.stopping = False #for manual stopping
+        self.stopping = False  # for manual stopping
         self.dead_workers = deque()
         try:
             log.info('starting arbiter '+repr(self))
@@ -172,7 +174,7 @@ class Arbiter(object):
             try:
                 log.info('shutting down arbiter '+repr(self))
                 if self.parent_pre_stop:
-                    self.parent_pre_stop() #hope this doesn't error
+                    self.parent_pre_stop()  # hope this doesn't error
                 #give workers the opportunity to shut down cleanly
                 for worker in self.workers:
                     worker.parent_notify_stop()
@@ -190,9 +192,9 @@ class Arbiter(object):
                 if repl:
                     self.stdin_handler.stop()
                 else:
-                    os._exit(0) #in case arbiter was daemonized, exit here
+                    os._exit(0)  # in case arbiter was daemonized, exit here
 
-    def _cull_workers(self): #remove workers which have died from self.workers
+    def _cull_workers(self):  # remove workers which have died from self.workers
         dead = set()
         for worker in self.workers:
             if not worker.parent_check():
@@ -200,16 +202,16 @@ class Arbiter(object):
         self.workers = self.workers - dead
 
     def _reap(self):
-        try: #reap dead workers to avoid filling up OS process table
+        try:  # reap dead workers to avoid filling up OS process table
             res = os.waitpid(-1, os.WNOHANG)
-            while res != (0,0):
+            while res != (0, 0):
                 name = EXIT_CODE_NAMES.get(res[1])
                 log.info('worker {0} exit status {1} ({2})'.format(
                     res[0], res[1], name))
                 self.dead_workers.append(DeadWorker(res[0], res[1], name))
                 res = os.waitpid(-1, os.WNOHANG)
         except OSError as e:
-            if getattr(e, "errno", None) == 10: #errno 10 is "no child processes"
+            if getattr(e, "errno", None) == 10:  # errno 10 is "no child processes"
                 log.info("all workers dead")
             else:
                 log.info("reap caught exception"+repr(e))
@@ -220,6 +222,8 @@ class Arbiter(object):
 DeadWorker = namedtuple('dead', 'pid code name')
 
 EXIT_CODE_NAMES = {}
+
+
 def _init_exit_code_names():
     import posix
     for name in [a for a in dir(posix) if "EX_" in a]:
@@ -236,14 +240,15 @@ class SockFile(object):
         try:
             self.sock.send(data, socket.MSG_DONTWAIT)
         except socket.error:
-            pass #TODO: something smarter
+            pass  # TODO: something smarter
 
     #TODO: more file-functions as needed
+
 
 def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
     'causes run to be executed in a newly spawned daemon process'
     fork = fork or os.fork
-    open(outfile, 'a').close() #TODO: configurable output file
+    open(outfile, 'a').close()  # TODO: configurable output file
     if pidfile and os.path.exists(pidfile):
         cur_pid = int(open(pidfile).read())
         try:
@@ -251,11 +256,11 @@ def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
             raise Exception("arbiter still running with pid:"+str(cur_pid))
         except OSError:
             pass
-    if fork(): #return True means we are in parent
+    if fork():  # return True means we are in parent
         return True
     else:
-        os.setsid() #break association with terminal via new session id
-        if fork(): #fork one more layer to ensure child will not re-acquire terminal
+        os.setsid()  # break association with terminal via new session id
+        if fork():  # fork one more layer to ensure child will not re-acquire terminal
             os._exit(0)
         if pidfile:
             with open(pidfile, 'w') as f:
@@ -265,7 +270,7 @@ def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
         os.close(0)
         os.dup2(fd, 1)
         os.dup2(fd, 2)
-        return False #return False means we are in daemonized process
+        return False  # return False means we are in daemonized process
 
 
 class StdinHandler(object):
@@ -280,11 +285,11 @@ class StdinHandler(object):
 
     def _interact(self):
         sys.stdout.flush()
-        print '' #newline on startup to clear prompt
+        print ''  # newline on startup to clear prompt
         while not self.stopping:
             inp = self.console.raw_input('ufork>> ')
             self.console.runsource(inp)
-        print '' #newline after done to clear prompt
+        print ''  # newline after done to clear prompt
         sys.stdout.flush()
 
     def start(self):
@@ -300,9 +305,9 @@ class StdinHandler(object):
 try:
     import gevent
 except:
-    pass #gevent worker not defined
+    pass  # gevent worker not defined
 else:
-    import gevent.pywsgi 
+    import gevent.pywsgi
     import gevent.socket
 
     class GeventWsgiArbiter(Arbiter):
@@ -315,33 +320,38 @@ else:
             self.wsgi = wsgi
             self.server = gevent.pywsgi.WSGIServer(self.sock, wsgi)
             self.server.stop_timeout = stop_timeout
+
             def close_sock():
                 self.sock.close()
-                self.server.socket.close() #TODO: cleaner way to work with gevent?
+                self.server.socket.close()  # TODO: cleaner way to work with gevent?
 
             Arbiter.__init__(self, post_fork=self.server.start,
-                child_pre_exit=self.server.stop,
-                parent_pre_stop=close_sock,
-                sleep=gevent.sleep, fork=gevent.fork)
+                             child_pre_exit=self.server.stop,
+                             parent_pre_stop=close_sock,
+                             sleep=gevent.sleep, fork=gevent.fork)
 
     def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
         GeventWsgiArbiter(wsgi, address, stop_timeout).run()
-            
+
 
 def wsgiref_thread_arbiter(wsgi, host, port):
     'probably not suitable for production use; example of threaded server'
     import wsgiref.simple_server
     httpd = wsgiref.simple_server.make_server(host, port, wsgi)
     httpd.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
     def start_server():
         server_thread = threading.Thread(target=httpd.serve_forever)
-        server_thread.daemon=True
+        server_thread.daemon = True
         server_thread.start()
+
     def close_socket():
         httpd.socket.close()
+
     arbiter = Arbiter(post_fork=start_server, child_pre_exit=httpd.shutdown,
                       parent_pre_stop=close_socket)
     return arbiter
+
 
 def serve_wsgiref_thread(wsgi, host, port):
     wsgiref_thread_arbiter(wsgi, host, port).run()
