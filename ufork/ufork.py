@@ -18,7 +18,8 @@ log = logging.getLogger(__name__)
 
 
 class Worker(object):
-    def __init__(self, post_fork, child_pre_exit=None, sleep=None, fork=None):
+    def __init__(self, post_fork, child_pre_exit=None, sleep=None, fork=None,
+                 printfunc=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit or (lambda: None)
         self.sleep = sleep or time.sleep
@@ -26,6 +27,7 @@ class Worker(object):
         self.stopping = False
         self.sock = None
         self.pid = None
+        self.printfunc = printfunc or _printfunc
         self.last_update = time.time()
 
     def fork_and_run(self):
@@ -81,11 +83,11 @@ class Worker(object):
             self.last_update = time.time()
             data = data.replace('\0', '')
             if data:
-                print self.pid, ':', data
+                self.logfunc(str(self.pid + ':' + data))
         try:  # check that process still exists
             os.kill(self.pid, 0)
-        except OSError as e:
-            log.info("worker died "+str(self.pid))
+        except OSError:
+            log.info("worker died " + str(self.pid))
             return False
         if time.time() - self.last_update > TIMEOUT:
             self.parent_kill()
@@ -96,13 +98,13 @@ class Worker(object):
         try:  # kill if proc still alive
             os.kill(self.pid, signal.SIGKILL)
         except OSError as e:
-            print "SIGKILL exception:", e
+            self.printfunc("SIGKILL exception:" + repr(e))
 
     def parent_notify_stop(self):
         try:
             os.kill(self.pid, signal.SIGTERM)
         except OSError as e:
-            print "SIGTERM exception:", e
+            self.printfunc("SIGTERM exception:" + repr(e))
 
     def child_close_fds(self):
         'close fds in the child after forking'
@@ -122,8 +124,11 @@ class Worker(object):
 
 
 class Arbiter(object):
+    '''
+    Object for managing a group of worker processes.
+    '''
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
-                 size=None, sleep=None, fork=None, extra=None):
+                 size=None, sleep=None, fork=None, printfunc=None, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -132,6 +137,7 @@ class Arbiter(object):
         self.size = size
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
+        self.printfunc = printfunc or _printfunc
         self.extra = extra  # a place to put additional data for CLI
         global LAST_ARBITER
         LAST_ARBITER = self  # for testing/debugging, a hook to get a global pointer
@@ -142,9 +148,22 @@ class Arbiter(object):
         self.thread.daemon = True
         self.thread.start()
 
-    def spawn_daemon(self, pidfile=None):
-        'causes run to be executed in a newly spawned daemon process'
-        if spawn_daemon(self.fork, pidfile):
+    def spawn_daemon(self, pidfile=None, outfile="out.txt"):
+        '''
+        Causes this arbiters run() function to be executed in a newly spawned
+        daemon process.
+
+        Parameters
+        ----------
+        pidfile : str, optional
+            Path at which to write a pidfile (file containing the pid of
+                the daemon process).
+        outfile : str, optional
+            Path to text file to write stdout and stderr of workers to.
+            (Daemonized arbiter process no longer has a stdout to write
+            to.)  Defaults to "out.txt".
+        '''
+        if spawn_daemon(self.fork, pidfile, outfile):
             return
         signal.signal(signal.SIGTERM, lambda signal, frame: self.stop())
         self.run(False)
@@ -163,7 +182,9 @@ class Arbiter(object):
             while not self.stopping:
                 #spawn additional workers as needed
                 for i in range(self.size - len(self.workers)):
-                    worker = Worker(self.post_fork, self.child_pre_exit, self.sleep, self.fork)
+                    worker = Worker(
+                        self.post_fork, self.child_pre_exit, self.sleep,
+                        self.fork, self.printfunc)
                     worker.fork_and_run()
                     log.info('started worker '+str(worker.pid))
                     self.workers.add(worker)
@@ -219,9 +240,12 @@ class Arbiter(object):
     def stop(self):
         self.stopping = True
 
-DeadWorker = namedtuple('dead', 'pid code name')
 
-EXIT_CODE_NAMES = {}
+def _printfunc(msg):
+    print msg
+
+
+DeadWorker = namedtuple('dead', 'pid code name')
 
 
 def _init_exit_code_names():
@@ -229,20 +253,9 @@ def _init_exit_code_names():
     for name in [a for a in dir(posix) if "EX_" in a]:
         value = getattr(posix, name)
         EXIT_CODE_NAMES[value] = name
+
+EXIT_CODE_NAMES = {}
 _init_exit_code_names()
-
-
-class SockFile(object):
-    def __init__(self, sock):
-        self.sock = sock
-
-    def write(self, data):
-        try:
-            self.sock.send(data, socket.MSG_DONTWAIT)
-        except socket.error:
-            pass  # TODO: something smarter
-
-    #TODO: more file-functions as needed
 
 
 def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
