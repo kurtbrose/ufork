@@ -295,11 +295,11 @@ class RotatingStdoutFile(object):
     for its simplicity.
     '''
     def __init__(self, path, num_files=8, file_size=2**23):
-        self.thread = threading.Thread(target=self._bridge)
-        self.stopping = False
+        self.path = path
         self.num_files = num_files
         self.file_size = file_size
         self.fd = None
+        self.stopping = False
         self._rotate()
 
     def stop(self):
@@ -312,21 +312,21 @@ class RotatingStdoutFile(object):
 
     def _run(self):
         while not self.stopping:
-            self.sleep(10.0)
+            time.sleep(10.0)
             if os.stat(self.path).st_size > self.file_size:
                 self._rotate()
 
     def _rotate(self):
         # rotate previous files if they exist
         files = [self.path] + [self.path + "." + str(i) 
-                               for i in range(2, self.num_files)]
+                               for i in range(1, self.num_files)]
         for src, dst in zip(files[:-1], files[1:]):
             if os.path.exists(src):
                 os.rename(src, dst)
         # hold onto previous fd
         old_fd = self.fd
         # re-open current file
-        self.fd = os.open(self.path, os.O_RDWR)
+        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR)
         os.dup2(self.fd, 1)
         os.dup2(self.fd, 2)
         if old_fd:  # close previous fd if it was open
