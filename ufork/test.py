@@ -182,3 +182,12 @@ def daemon_test(addr = ("0.0.0.0", 8888)):
     pid = int(open('test.pid').read())
     os.kill(pid, signal.SIGTERM)
 
+
+def test_stdout_handler():
+    'note: destroyts standard out'
+    s = ufork.RotatingStdoutFile('test_out.txt', 3, 1024)
+    s.start()
+    for i in range(5):
+        print 'a' * 1040
+        time.sleep(11)
+
