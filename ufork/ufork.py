@@ -279,11 +279,58 @@ def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
             with open(pidfile, 'w') as f:
                 f.write(str(os.getpid()))
         logging.root.addHandler(SysLogHandler())
-        fd = os.open(outfile, os.O_RDWR)
-        os.close(0)
-        os.dup2(fd, 1)
-        os.dup2(fd, 2)
+        rotating_out = RotatingStdoutFile(outfile)
+        rotating_out.start()
         return False  # return False means we are in daemonized process
+
+
+class RotatingStdoutFile(object):
+    '''
+    Manages rotation of a file to which stdout and stderr are redirected.
+
+    NOTE: Although structured as a class, there can really only be one of these,
+    since each process only has a single standard out (-:
+
+    NOTE: there are a variety of schemes possible here, fd rotation was chosen
+    for its simplicity.
+    '''
+    def __init__(self, path, num_files=8, file_size=2**23):
+        self.thread = threading.Thread(target=self._bridge)
+        self.stopping = False
+        self.num_files = num_files
+        self.file_size = file_size
+        self.fd = None
+        self._rotate()
+
+    def stop(self):
+        self.stopping = True
+
+    def start(self):
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def _run(self):
+        while not self.stopping:
+            self.sleep(10.0)
+            if os.stat(self.path).st_size > self.file_size:
+                self._rotate()
+
+    def _rotate(self):
+        # rotate previous files if they exist
+        files = [self.path] + [self.path + "." + str(i) 
+                               for i in range(2, self.num_files)]
+        for src, dst in zip(files[:-1], files[1:]):
+            if os.path.exists(src):
+                os.rename(src, dst)
+        # hold onto previous fd
+        old_fd = self.fd
+        # re-open current file
+        self.fd = os.open(self.path, os.O_RDWR)
+        os.dup2(self.fd, 1)
+        os.dup2(self.fd, 2)
+        if old_fd:  # close previous fd if it was open
+            old_fd.close()
 
 
 class StdinHandler(object):
