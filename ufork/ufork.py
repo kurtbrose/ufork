@@ -83,7 +83,7 @@ class Worker(object):
             self.last_update = time.time()
             data = data.replace('\0', '')
             if data:
-                self.logfunc(str(self.pid + ':' + data))
+                self.printfunc(str(self.pid + ':' + data))
         try:  # check that process still exists
             os.kill(self.pid, 0)
         except OSError:
