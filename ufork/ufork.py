@@ -133,7 +133,7 @@ class Arbiter(object):
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
         if size is None:
-            size = 2 * cpu_count() + 1
+            size = cpu_count() + 1  # hyper-threading cores are counted in cpu_count
         self.size = size
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
