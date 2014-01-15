@@ -189,5 +189,10 @@ def test_stdout_handler():
     s.start()
     for i in range(5):
         print 'a' * 1040
+        print str(i) * 100
         time.sleep(11)
+
+if __name__ == "__main__":
+    regression_test()
+
 

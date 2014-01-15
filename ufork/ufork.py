@@ -6,6 +6,7 @@ from multiprocessing import cpu_count
 import threading
 import code
 import signal
+import resource
 from random import seed  # re-seed random number generator post-fork
 from collections import deque, namedtuple
 import logging
@@ -18,22 +19,17 @@ log = logging.getLogger(__name__)
 
 
 class Worker(object):
-    def __init__(self, post_fork, child_pre_exit=None, sleep=None, fork=None,
-                 printfunc=None):
-        self.post_fork = post_fork
-        self.child_pre_exit = child_pre_exit or (lambda: None)
-        self.sleep = sleep or time.sleep
-        self.fork = fork or os.fork
+    def __init__(self, arbiter):
+        self.arbiter = arbiter
         self.stopping = False
         self.sock = None
         self.pid = None
-        self.printfunc = printfunc or _printfunc
         self.last_update = time.time()
 
     def fork_and_run(self):
         parent, child = socket.socketpair()
         ppid = os.getpid()
-        pid = self.fork()
+        pid = self.arbiter.fork()
         if pid:  # in parent fork
             self.pid = pid
             self.sock = parent
@@ -54,23 +50,37 @@ class Worker(object):
         seed()  # re-seed random number generator post-fork
         self.stdin_handler = StdinHandler(self)
         self.stdin_handler.start()
-        self.post_fork()
+        self.arbiter.post_fork()
 
         try:
             log.info('worker starting '+str(pid))
+            fd_path = '/proc/{0}/fd'.format(pid)
+            check_fd = os.path.exists(fd_path)
             while not self.stopping:
                 try:
                     os.kill(ppid, 0)  # check parent process exists
                 except OSError as e:
                     log.info("worker parent died "+str(ppid))
                     break
+                res = resource.getrusage(resource.RUSAGE_SELF)
+                if res.ru_maxrss * resource.getpagesize() > self.arbiter.child_memlimit:
+                    raise OSError("memory usage exceeded limit"
+                                  " {0} MiB".format(self.arbiter.child_memlimit/1024))
+                if check_fd:
+                    fd_count = len(os.listdir(fd_path))
+                    fd_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+                    if fd_count > fd_limit - 10 or fd_count > fd_limit * 0.9:
+                        raise OSError("open fd count {0} too close"
+                                      " to fd limit {1}".format(fd_count, fd_limit))
+                num_open_fds = len(os.listdir('/proc/{0}/fd'.format(pid)))
                 child.send('\0')
-                self.sleep(1.0)
+                self.arbiter.sleep(1.0)
         except Exception as e:
             log.error("worker error "+repr(e))
             raise
         finally:
-            self.child_pre_exit()
+            if self.arbiter.child_pre_exit:
+                self.arbiter.child_pre_exit()
         log.info("worker shutting down "+str(pid))
         os._exit(0)  # prevent arbiter code from executing in child
 
@@ -83,7 +93,7 @@ class Worker(object):
             self.last_update = time.time()
             data = data.replace('\0', '')
             if data:
-                self.printfunc(str(self.pid + ':' + data))
+                self.arbiter.printfunc(str(self.pid) + ':' + data)
         try:  # check that process still exists
             os.kill(self.pid, 0)
         except OSError:
@@ -98,13 +108,13 @@ class Worker(object):
         try:  # kill if proc still alive
             os.kill(self.pid, signal.SIGKILL)
         except OSError as e:
-            self.printfunc("SIGKILL exception:" + repr(e))
+            self.arbiter.printfunc("SIGKILL exception:" + repr(e))
 
     def parent_notify_stop(self):
         try:
             os.kill(self.pid, signal.SIGTERM)
         except OSError as e:
-            self.printfunc("SIGTERM exception:" + repr(e))
+            self.arbiter.printfunc("SIGTERM exception:" + repr(e))
 
     def child_close_fds(self):
         'close fds in the child after forking'
@@ -128,7 +138,8 @@ class Arbiter(object):
     Object for managing a group of worker processes.
     '''
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
-                 size=None, sleep=None, fork=None, printfunc=None, extra=None):
+                 size=None, sleep=None, fork=None, printfunc=None, 
+                 child_memlimit=2**30, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -138,6 +149,7 @@ class Arbiter(object):
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
         self.printfunc = printfunc or _printfunc
+        self.child_memlimit = child_memlimit
         self.extra = extra  # a place to put additional data for CLI
         global LAST_ARBITER
         LAST_ARBITER = self  # for testing/debugging, a hook to get a global pointer
@@ -182,9 +194,7 @@ class Arbiter(object):
             while not self.stopping:
                 #spawn additional workers as needed
                 for i in range(self.size - len(self.workers)):
-                    worker = Worker(
-                        self.post_fork, self.child_pre_exit, self.sleep,
-                        self.fork, self.printfunc)
+                    worker = Worker(self)
                     worker.fork_and_run()
                     log.info('started worker '+str(worker.pid))
                     self.workers.add(worker)
