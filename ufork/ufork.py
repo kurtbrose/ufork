@@ -287,7 +287,7 @@ def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
             os._exit(0)
         if pidfile:
             with open(pidfile, 'w') as f:
-                f.write(str(os.getpid()))
+                f.write(str(os.getpid()) + "\n")
         logging.root.addHandler(SysLogHandler())
         rotating_out = RotatingStdoutFile(outfile)
         rotating_out.start()
