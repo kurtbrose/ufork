@@ -192,6 +192,13 @@ def test_stdout_handler():
         print str(i) * 100
         time.sleep(11)
 
+def test_stdout_flood():
+    def stdout_flood():
+        while 1:
+	    print 'a' * 10000000
+    arb = ufork.Arbiter(stdout_flood)
+    arb.run()
+        
 if __name__ == "__main__":
     regression_test()
 
