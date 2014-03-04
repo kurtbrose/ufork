@@ -50,7 +50,11 @@ class Worker(object):
         seed()  # re-seed random number generator post-fork
         self.stdin_handler = StdinHandler(self)
         self.stdin_handler.start()
-        self.arbiter.post_fork()
+        try:
+            self.arbiter.post_fork()
+        except:
+            self.arbiter.printfunc("Warning: user post_fork function raised exception:\n"
+                + traceback.format_exc())
 
         try:
             log.info('worker starting '+str(pid))
