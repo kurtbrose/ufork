@@ -19,12 +19,17 @@ log = logging.getLogger(__name__)
 
 
 class Worker(object):
-    def __init__(self, arbiter):
+    def __init__(self, arbiter, index):
         self.arbiter = arbiter
         self.stopping = False
         self.sock = None
         self.pid = None
         self.last_update = time.time()
+        self.index = index
+        self.serial_num = Worker._nxt_serial_num
+        _nxt_serial_num += 1
+
+    _nxt_serial_num = 0
 
     def fork_and_run(self):
         parent, child = socket.socketpair()
@@ -36,6 +41,8 @@ class Worker(object):
             child.close()
             return
         #in child fork
+        global CUR_WORKER
+        CUR_WORKER = self
         parent.close()
         signal.signal(signal.SIGTERM, lambda signal, frame: self.child_stop())
         pid = os.getpid()
@@ -55,6 +62,7 @@ class Worker(object):
         except:
             self.arbiter.printfunc("Warning: user post_fork function raised exception:\n"
                 + traceback.format_exc())
+        child_fdlimit = self.arbiter.child_fdlimit
 
         try:
             log.info('worker starting '+str(pid))
@@ -72,6 +80,9 @@ class Worker(object):
                                   " {0} MiB".format(self.arbiter.child_memlimit/1024))
                 if check_fd:
                     fd_count = len(os.listdir(fd_path))
+                    if child_fdlimit and fd_count > child_fdlimit:
+                        raise OSError("open fd count {0} too close to user "
+                                      "fd limit {1}".format(fd_count, child_fdlimit))
                     fd_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
                     if fd_count > fd_limit - 10 or fd_count > fd_limit * 0.9:
                         raise OSError("open fd count {0} too close"
@@ -136,6 +147,14 @@ class Worker(object):
 
 #SIGINT and SIGTERM mean shutdown cleanly
 
+def cur_worker():
+    '''
+    Returns the current worker object if in a worker process, else None
+    '''
+    return CUR_WORKER
+
+CUR_WORKER = None
+
 
 class Arbiter(object):
     '''
@@ -143,7 +162,7 @@ class Arbiter(object):
     '''
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
                  size=None, sleep=None, fork=None, printfunc=None, 
-                 child_memlimit=2**30, extra=None):
+                 child_memlimit=2**30, child_fdlimit=None, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -154,6 +173,7 @@ class Arbiter(object):
         self.fork = fork or os.fork
         self.printfunc = printfunc or _printfunc
         self.child_memlimit = child_memlimit
+        self.child_fdlimit = child_fdlimit
         self.extra = extra  # a place to put additional data for CLI
         global LAST_ARBITER
         LAST_ARBITER = self  # for testing/debugging, a hook to get a global pointer
@@ -185,7 +205,7 @@ class Arbiter(object):
         self.run(False)
 
     def run(self, repl=True):
-        self.workers = set()  # for efficient removal
+        self.workers = {}
         if repl:
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
@@ -194,35 +214,36 @@ class Arbiter(object):
         self.stopping = False  # for manual stopping
         self.dead_workers = deque()
         try:
-            log.info('starting arbiter '+repr(self))
+            log.info('starting arbiter ' + repr(self))
             while not self.stopping:
                 #spawn additional workers as needed
-                for i in range(self.size - len(self.workers)):
-                    worker = Worker(self)
-                    worker.fork_and_run()
-                    log.info('started worker '+str(worker.pid))
-                    self.workers.add(worker)
+                for i in range(self.size):
+                    if i not in self.workers:
+                        worker = Worker(self, i)
+                        worker.fork_and_run()
+                        log.info('started worker ' + str(worker.pid))
+                        self.workers[i] = worker
                 self._cull_workers()
                 self._reap()
                 time.sleep(1.0)
         finally:
             try:
-                log.info('shutting down arbiter '+repr(self))
+                log.info('shutting down arbiter ' + repr(self))
                 if self.parent_pre_stop:
                     self.parent_pre_stop()  # hope this doesn't error
                 #give workers the opportunity to shut down cleanly
-                for worker in self.workers:
+                for worker in self.workers.values():
                     worker.parent_notify_stop()
                 shutdown_time = time.time()
                 while self.workers and time.time() < shutdown_time + TIMEOUT:
                     self._cull_workers()
                     time.sleep(1.0)
                 #if workers have not shut down cleanly by now, kill them
-                for w in self.workers:
+                for w in self.workers.values():
                     w.parent_kill()
                 self._reap()
             except:
-                log.error("warning, arbiter shutdown had exception: "+traceback.format_exc())
+                log.error("warning, arbiter shutdown had exception: " + traceback.format_exc())
             finally:
                 if repl:
                     self.stdin_handler.stop()
@@ -230,11 +251,10 @@ class Arbiter(object):
                     os._exit(0)  # in case arbiter was daemonized, exit here
 
     def _cull_workers(self):  # remove workers which have died from self.workers
-        dead = set()
-        for worker in self.workers:
-            if not worker.parent_check():
+        for i in range(len(self.workers)):
+            if not self.workers[i].parent_check():
+                del self.workers[i]
                 dead.add(worker)
-        self.workers = self.workers - dead
 
     def _reap(self):
         try:  # reap dead workers to avoid filling up OS process table
@@ -249,7 +269,7 @@ class Arbiter(object):
             if getattr(e, "errno", None) == 10:  # errno 10 is "no child processes"
                 log.info("all workers dead")
             else:
-                log.info("reap caught exception"+repr(e))
+                log.info("reap caught exception" + repr(e))
 
     def stop(self):
         self.stopping = True
