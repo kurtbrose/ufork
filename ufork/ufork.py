@@ -27,7 +27,7 @@ class Worker(object):
         self.last_update = time.time()
         self.index = index
         self.serial_num = Worker._nxt_serial_num
-        _nxt_serial_num += 1
+        Worker._nxt_serial_num += 1
 
     _nxt_serial_num = 0
 

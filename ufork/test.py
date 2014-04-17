@@ -103,7 +103,7 @@ def worker_cycle_test():
     assert arbiter.dead_workers
     print arbiter.dead_workers
     leaked_workers = []
-    for worker in arbiter.workers:
+    for worker in arbiter.workers.values():
         try: #check if process still exists
             os.kill(worker.pid, 0)
             leaked_workers.append(worker.pid)
