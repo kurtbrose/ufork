@@ -7,115 +7,133 @@ import threading
 import code
 import signal
 import resource
+import errno
 from random import seed  # re-seed random number generator post-fork
 from collections import deque, namedtuple
 import logging
 from logging.handlers import SysLogHandler
 import traceback
+import select
 
 TIMEOUT = 10.0
 
-log = logging.getLogger(__name__)
-
 
 class Worker(object):
-    def __init__(self, arbiter, index):
+    def __init__(self, arbiter):
         self.arbiter = arbiter
         self.stopping = False
         self.sock = None
         self.pid = None
         self.last_update = time.time()
-        self.index = index
-        self.serial_num = Worker._nxt_serial_num
-        Worker._nxt_serial_num += 1
-
-    _nxt_serial_num = 0
 
     def fork_and_run(self):
-        parent, child = socket.socketpair()
+        parent_io, child_io = socket.socketpair()
+        parent_health, child_health = socket.socketpair()
         ppid = os.getpid()
         pid = self.arbiter.fork()
         if pid:  # in parent fork
             self.pid = pid
-            self.sock = parent
-            child.close()
+            self.child_io = parent_io
+            self.child_health = parent_health
+            child_io.close()
+            child_health.close()
+            self.arbiter.total_children += 1
             return
         #in child fork
-        global CUR_WORKER
-        CUR_WORKER = self
-        parent.close()
-        signal.signal(signal.SIGTERM, lambda signal, frame: self.child_stop())
-        pid = os.getpid()
-        self.child_close_fds()
-        #TODO: should these go to UDP port 514? (syslog)
-        #set stdout and stderr filenos to point to the child end of the socket-pair
-        os.dup2(child.fileno(), 0)
-        os.dup2(child.fileno(), 1)
-        os.dup2(child.fileno(), 2)
-        #TODO: prevent blocking when stdout buffer full?
-        # (SockFile class provides this behavior)
-        seed()  # re-seed random number generator post-fork
-        self.stdin_handler = StdinHandler(self)
-        self.stdin_handler.start()
         try:
+            parent_io.close()
+            parent_health.close()
+            signal.signal(signal.SIGTERM,
+                          lambda signal, frame: self.child_stop())
+            pid = os.getpid()
+            self.child_close_fds()
+            #TODO: should these go to UDP port 514? (syslog) set
+            #stdout and stderr filenos to point to the child end of
+            #the socket-pair
+            os.dup2(child_io.fileno(), 0)
+            os.dup2(child_io.fileno(), 1)
+            os.dup2(child_io.fileno(), 2)
+            #TODO: prevent blocking when stdout buffer full?
+            # (SockFile class provides this behavior)
+            seed()  # re-seed random number generator post-fork
+            if self.arbiter.child_console:
+                self.stdin_handler = StdinHandler(self)
+                self.stdin_handler.start()
             self.arbiter.post_fork()
+            failed = False
+            try:
+                self.arbiter.printfunc('worker starting '+str(pid))
+                fd_path = '/proc/{0}/fd'.format(pid)
+                check_fd = os.path.exists(fd_path)
+                while not self.stopping:
+                    try:
+                        os.kill(ppid, 0)  # check parent process exists
+                    except OSError as e:
+                        self.arbiter.printfunc("worker parent died "+str(ppid))
+                        break
+                    if os.uname()[0] != 'Darwin':
+                        res = resource.getrusage(resource.RUSAGE_SELF)
+                        if res.ru_maxrss * 1024 > self.arbiter.child_memlimit:
+                            raise OSError("memory usage {1} * {2} exceeded limit"
+                                          " {0} MiB".format(self.arbiter.child_memlimit/1024,
+                                                            res.ru_maxrss,
+                                                            1024))
+                        if check_fd:
+                            fd_count = len(os.listdir(fd_path))
+                            fd_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+                            if fd_count > fd_limit - 10 or fd_count > fd_limit * 0.9:
+                                raise OSError("open fd count {0} too close"
+                                              " to fd limit {1}".format(fd_count, fd_limit))
+                            num_open_fds = len(os.listdir('/proc/{0}/fd'.format(pid)))
+                    child_health.send('\0')
+                    self.arbiter.sleep(1.0)
+            except Exception as e:
+                self.arbiter.printfunc("worker error " + repr(e))
+                failed = True
+            finally:
+                if self.arbiter.child_pre_exit:
+                    self.arbiter.child_pre_exit()
         except:
-            self.arbiter.printfunc("Warning: user post_fork function raised exception:\n"
-                + traceback.format_exc())
-        child_fdlimit = self.arbiter.child_fdlimit
-
-        try:
-            log.info('worker starting '+str(pid))
-            fd_path = '/proc/{0}/fd'.format(pid)
-            check_fd = os.path.exists(fd_path)
-            while not self.stopping:
-                try:
-                    os.kill(ppid, 0)  # check parent process exists
-                except OSError as e:
-                    log.info("worker parent died "+str(ppid))
-                    break
-                res = resource.getrusage(resource.RUSAGE_SELF)
-                if res.ru_maxrss * resource.getpagesize() > self.arbiter.child_memlimit:
-                    raise OSError("memory usage exceeded limit"
-                                  " {0} MiB".format(self.arbiter.child_memlimit/1024))
-                if check_fd:
-                    fd_count = len(os.listdir(fd_path))
-                    if child_fdlimit and fd_count > child_fdlimit:
-                        raise OSError("open fd count {0} too close to user "
-                                      "fd limit {1}".format(fd_count, child_fdlimit))
-                    fd_limit = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
-                    if fd_count > fd_limit - 10 or fd_count > fd_limit * 0.9:
-                        raise OSError("open fd count {0} too close"
-                                      " to fd limit {1}".format(fd_count, fd_limit))
-                num_open_fds = len(os.listdir('/proc/{0}/fd'.format(pid)))
-                child.send('\0')
-                self.arbiter.sleep(1.0)
-        except Exception as e:
-            log.error("worker error "+repr(e))
-            raise
+            self.arbiter.printfunc("worker shutting down with error")
+            self.arbiter.printfunc(traceback.format_exc())
+            os._exit(1)  # prevent arbiter code from executing in child
         finally:
-            if self.arbiter.child_pre_exit:
-                self.arbiter.child_pre_exit()
-        log.info("worker shutting down "+str(pid))
-        os._exit(0)  # prevent arbiter code from executing in child
+            os._exit(0)  # prevent arbiter code from executing in child
 
-    def parent_check(self):
+    def parent_print_io(self):
         try:
-            data = self.sock.recv(4096, socket.MSG_DONTWAIT)
+            data = self.child_io.recv(4096, socket.MSG_DONTWAIT)
         except socket.error:
             pass
         else:
             self.last_update = time.time()
-            data = data.replace('\0', '')
             if data:
                 self.arbiter.printfunc(str(self.pid) + ':' + data)
+
+    def parent_check(self):
+        try:
+            data = self.child_health.recv(4096, socket.MSG_DONTWAIT)
+        except socket.error:
+            pass
+        else:
+            self.last_update = time.time()
         try:  # check that process still exists
             os.kill(self.pid, 0)
         except OSError:
-            log.info("worker died " + str(self.pid))
+            self.arbiter.printfunc("worker died " + str(self.pid))
             return False
         if time.time() - self.last_update > TIMEOUT:
+            self.arbiter.printfunc("worker timed out" + str(self.pid))
+            self.arbiter.timed_out_children += 1
+            total_children, timed_out_children, last_logged_child_issue = \
+                self.arbiter.total_children, self.arbiter.timed_out_children, self.arbiter.last_logged_child_issue
+            if total_children > 5 and timed_out_children > 0.5 * total_children and \
+                    time.time() - last_logged_child_issue > 60 * 10:
+                self.arbiter.last_logged_child_issue = time.time()
+                self.arbiter.printfunc("Most children are wedging!  {0} time outs, {1} total".format(
+                    timed_out_children, total_children))
             self.parent_kill()
+            print 'returning false for', self.pid
             return False
         return True
 
@@ -143,17 +161,9 @@ class Worker(object):
         self.sock.sendall(data)
 
     def __repr__(self):
-        return "ufork.Worker<pid="+str(self.pid)+">"
+        return "ufork.Worker<pid=" + str(self.pid) + ">"
 
 #SIGINT and SIGTERM mean shutdown cleanly
-
-def cur_worker():
-    '''
-    Returns the current worker object if in a worker process, else None
-    '''
-    return CUR_WORKER
-
-CUR_WORKER = None
 
 
 class Arbiter(object):
@@ -161,22 +171,26 @@ class Arbiter(object):
     Object for managing a group of worker processes.
     '''
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
-                 size=None, sleep=None, fork=None, printfunc=None, 
-                 child_memlimit=2**30, child_fdlimit=None, extra=None):
+                 size=None, sleep=None, fork=None, printfunc=None,
+                 child_memlimit=2**30, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
         if size is None:
-            size = cpu_count() + 1  # hyper-threading cores are counted in cpu_count
+            size = max(cpu_count() - 1, 2)  # hyper-threading cores are counted in cpu_count
         self.size = size
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
         self.printfunc = printfunc or _printfunc
         self.child_memlimit = child_memlimit
-        self.child_fdlimit = child_fdlimit
         self.extra = extra  # a place to put additional data for CLI
+        self.child_console = False
         global LAST_ARBITER
         LAST_ARBITER = self  # for testing/debugging, a hook to get a global pointer
+
+        self.total_children = 0
+        self.timed_out_children = 0
+        self.last_logged_child_issue = 0
 
     def spawn_thread(self):
         'causes run to be executed in a thread'
@@ -184,66 +198,103 @@ class Arbiter(object):
         self.thread.daemon = True
         self.thread.start()
 
-    def spawn_daemon(self, pidfile=None, outfile="out.txt"):
+    def spawn_daemon(self, pgrpfile=None, outfile="out.txt"):
         '''
         Causes this arbiters run() function to be executed in a newly spawned
         daemon process.
 
         Parameters
         ----------
-        pidfile : str, optional
-            Path at which to write a pidfile (file containing the pid of
-                the daemon process).
+        pgrpfile : str, optional
+            Path at which to write a pgrpfile (file containing the process
+            group id of the daemon process and its children).
         outfile : str, optional
             Path to text file to write stdout and stderr of workers to.
             (Daemonized arbiter process no longer has a stdout to write
             to.)  Defaults to "out.txt".
         '''
-        if spawn_daemon(self.fork, pidfile, outfile):
+        if spawn_daemon(self.fork, pgrpfile, outfile):
             return
         signal.signal(signal.SIGTERM, lambda signal, frame: self.stop())
         self.run(False)
 
+    def log_children(self):
+        while True:
+            try:
+                worker_ios = dict((worker.child_io, worker)
+                                  for worker in self.workers)
+                try:
+                    readable, _, _ = select.select(worker_ios,
+                                                   [], [], 0.1)
+                except ValueError:
+                    # one of the workers died after worker_ios was
+                    # created but before select started, and we were
+                    # monitoring some python *socket* object it owned.
+                    continue
+                except OSError as e:
+                    if e.errno == errno.EBADF:
+                        # one of the workers died after worker_ios was
+                        # created but before select started, and we
+                        # were monitoring some *integer* file
+                        # descriptor it owned.
+                        continue
+                    else:
+                        raise
+                else:
+                    for worker_io in readable:
+                        # there should never be a key error here, because
+                        # nothing alters workers_ios
+                        worker_ios[worker_io].parent_print_io()
+            except Exception:
+                self.printfunc(
+                    "error in arbiter's log_children:\n"
+                    + traceback.format_exc())
+
     def run(self, repl=True):
-        self.workers = {}
+        self.workers = set()  # for efficient removal
         if repl:
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
         else:
             self.stdin_handler = None
         self.stopping = False  # for manual stopping
-        self.dead_workers = deque()
+        self.dead_workers = deque(maxlen=10)
+
+        self.io_log_thread = threading.Thread(target=self.log_children)
+        self.io_log_thread.daemon = True
+        self.io_log_thread.start()
+
         try:
-            log.info('starting arbiter ' + repr(self))
+            self.printfunc('starting arbiter ' + repr(self) + ' ' + str(os.getpid()))
             while not self.stopping:
                 #spawn additional workers as needed
-                for i in range(self.size):
-                    if i not in self.workers:
-                        worker = Worker(self, i)
-                        worker.fork_and_run()
-                        log.info('started worker ' + str(worker.pid))
-                        self.workers[i] = worker
+                for i in range(self.size - len(self.workers)):
+                    worker = Worker(self)
+                    worker.fork_and_run()
+                    self.printfunc('started worker ' + str(worker.pid))
+                    self.workers.add(worker)
                 self._cull_workers()
                 self._reap()
                 time.sleep(1.0)
         finally:
             try:
-                log.info('shutting down arbiter ' + repr(self))
+                self.printfunc('shutting down arbiter ' + repr(self))
                 if self.parent_pre_stop:
                     self.parent_pre_stop()  # hope this doesn't error
                 #give workers the opportunity to shut down cleanly
-                for worker in self.workers.values():
+                for worker in self.workers:
                     worker.parent_notify_stop()
                 shutdown_time = time.time()
                 while self.workers and time.time() < shutdown_time + TIMEOUT:
                     self._cull_workers()
+                    self._reap()
                     time.sleep(1.0)
                 #if workers have not shut down cleanly by now, kill them
-                for w in self.workers.values():
+                for w in self.workers:
                     w.parent_kill()
                 self._reap()
             except:
-                log.error("warning, arbiter shutdown had exception: " + traceback.format_exc())
+                self.printfunc("warning, arbiter shutdown had exception: " + traceback.format_exc())
             finally:
                 if repl:
                     self.stdin_handler.stop()
@@ -251,25 +302,29 @@ class Arbiter(object):
                     os._exit(0)  # in case arbiter was daemonized, exit here
 
     def _cull_workers(self):  # remove workers which have died from self.workers
-        for i in range(len(self.workers)):
-            if not self.workers[i].parent_check():
-                del self.workers[i]
+        dead = set()
+        for worker in self.workers:
+            if not worker.parent_check():
+                # don't leak sockets
+                worker.child_io.close()
+                worker.child_health.close()
                 dead.add(worker)
+        self.workers = self.workers - dead
 
     def _reap(self):
         try:  # reap dead workers to avoid filling up OS process table
             res = os.waitpid(-1, os.WNOHANG)
             while res != (0, 0):
                 name = EXIT_CODE_NAMES.get(res[1])
-                log.info('worker {0} exit status {1} ({2})'.format(
+                self.printfunc('worker {0} exit status {1} ({2})'.format(
                     res[0], res[1], name))
                 self.dead_workers.append(DeadWorker(res[0], res[1], name))
                 res = os.waitpid(-1, os.WNOHANG)
         except OSError as e:
             if getattr(e, "errno", None) == 10:  # errno 10 is "no child processes"
-                log.info("all workers dead")
+                self.printfunc("all workers dead")
             else:
-                log.info("reap caught exception" + repr(e))
+                self.printfunc("reap caught exception" + repr(e))
 
     def stop(self):
         self.stopping = True
@@ -292,15 +347,15 @@ EXIT_CODE_NAMES = {}
 _init_exit_code_names()
 
 
-def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
+def spawn_daemon(fork=None, pgrpfile=None, outfile='out.txt'):
     'causes run to be executed in a newly spawned daemon process'
     fork = fork or os.fork
     open(outfile, 'a').close()  # TODO: configurable output file
-    if pidfile and os.path.exists(pidfile):
-        cur_pid = int(open(pidfile).read())
+    if pgrpfile and os.path.exists(pgrpfile):
         try:
-            os.kill(cur_pid, 0)
-            raise Exception("arbiter still running with pid:"+str(cur_pid))
+            cur_pid = int(open(pgrpfile).read().rstrip("\n"))
+            os.killpg(cur_pid, 0)
+            raise Exception("arbiter still running with pid:" + str(cur_pid))
         except OSError:
             pass
     if fork():  # return True means we are in parent
@@ -309,9 +364,9 @@ def spawn_daemon(fork=None, pidfile=None, outfile='out.txt'):
         os.setsid()  # break association with terminal via new session id
         if fork():  # fork one more layer to ensure child will not re-acquire terminal
             os._exit(0)
-        if pidfile:
-            with open(pidfile, 'w') as f:
-                f.write(str(os.getpid()) + "\n")
+        if pgrpfile:
+            with open(pgrpfile, 'w') as f:
+                f.write(str(os.getpgrp()) + "\n")
         logging.root.addHandler(SysLogHandler())
         rotating_out = RotatingStdoutFile(outfile)
         rotating_out.start()
@@ -352,7 +407,7 @@ class RotatingStdoutFile(object):
 
     def _rotate(self):
         # rotate previous files if they exist
-        files = [self.path] + [self.path + "." + str(i) 
+        files = [self.path] + [self.path + "." + str(i)
                                for i in range(1, self.num_files)]
         for src, dst in reversed(zip(files[:-1], files[1:])):
             if os.path.exists(src):
