@@ -16,15 +16,17 @@ import traceback
 import select
 
 TIMEOUT = 10.0
+CUR_WORKER = None
 
 
 class Worker(object):
-    def __init__(self, arbiter):
+    def __init__(self, arbiter, index):
         self.arbiter = arbiter
         self.stopping = False
         self.sock = None
         self.pid = None
         self.last_update = time.time()
+        self.worker_id = index
 
     def fork_and_run(self):
         parent_io, child_io = socket.socketpair()
@@ -40,6 +42,8 @@ class Worker(object):
             self.arbiter.total_children += 1
             return
         #in child fork
+        global CUR_WORKER
+        CUR_WORKER = self
         try:
             parent_io.close()
             parent_health.close()
@@ -163,6 +167,13 @@ class Worker(object):
     def __repr__(self):
         return "ufork.Worker<pid=" + str(self.pid) + ">"
 
+
+def cur_worker_id():
+    if CUR_WORKER:
+        return CUR_WORKER.worker_id
+    return None
+
+
 #SIGINT and SIGTERM mean shutdown cleanly
 
 
@@ -222,7 +233,7 @@ class Arbiter(object):
         while True:
             try:
                 worker_ios = dict((worker.child_io, worker)
-                                  for worker in self.workers)
+                                  for worker in self.workers.values())
                 try:
                     readable, _, _ = select.select(worker_ios,
                                                    [], [], 0.1)
@@ -251,7 +262,7 @@ class Arbiter(object):
                     + traceback.format_exc())
 
     def run(self, repl=True):
-        self.workers = set()  # for efficient removal
+        self.workers = {}
         if repl:
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
@@ -268,11 +279,13 @@ class Arbiter(object):
             self.printfunc('starting arbiter ' + repr(self) + ' ' + str(os.getpid()))
             while not self.stopping:
                 #spawn additional workers as needed
-                for i in range(self.size - len(self.workers)):
-                    worker = Worker(self)
+                for worker_id in range(self.size):
+                    if worker_id in self.workers:
+                        continue
+                    worker = Worker(self, worker_id)
                     worker.fork_and_run()
                     self.printfunc('started worker ' + str(worker.pid))
-                    self.workers.add(worker)
+                    self.workers[worker_id] = worker
                 self._cull_workers()
                 self._reap()
                 time.sleep(1.0)
@@ -282,7 +295,7 @@ class Arbiter(object):
                 if self.parent_pre_stop:
                     self.parent_pre_stop()  # hope this doesn't error
                 #give workers the opportunity to shut down cleanly
-                for worker in self.workers:
+                for worker in self.workers.values():
                     worker.parent_notify_stop()
                 shutdown_time = time.time()
                 while self.workers and time.time() < shutdown_time + TIMEOUT:
@@ -290,7 +303,7 @@ class Arbiter(object):
                     self._reap()
                     time.sleep(1.0)
                 #if workers have not shut down cleanly by now, kill them
-                for w in self.workers:
+                for w in self.workers.values():
                     w.parent_kill()
                 self._reap()
             except:
@@ -302,14 +315,12 @@ class Arbiter(object):
                     os._exit(0)  # in case arbiter was daemonized, exit here
 
     def _cull_workers(self):  # remove workers which have died from self.workers
-        dead = set()
-        for worker in self.workers:
+        for worker_id, worker in self.workers.items():
             if not worker.parent_check():
                 # don't leak sockets
                 worker.child_io.close()
                 worker.child_health.close()
-                dead.add(worker)
-        self.workers = self.workers - dead
+                del self.workers[worker_id]
 
     def _reap(self):
         try:  # reap dead workers to avoid filling up OS process table
