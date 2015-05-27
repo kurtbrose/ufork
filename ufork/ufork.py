@@ -367,7 +367,7 @@ def spawn_daemon(fork=None, pgrpfile=None, outfile='out.txt'):
             cur_pid = int(open(pgrpfile).read().rstrip("\n"))
             os.killpg(cur_pid, 0)
             raise Exception("arbiter still running with pid:" + str(cur_pid))
-        except OSError:
+        except OSError, ValueError:
             pass
     if fork():  # return True means we are in parent
         return True
