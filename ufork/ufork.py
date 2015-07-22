@@ -112,7 +112,7 @@ class Worker(object):
         else:
             self.last_update = time.time()
             if data:
-                self.arbiter.printfunc(str(self.pid) + ':' + data)
+                self.arbiter.printfunc(str(self.pid) + ':' + data.rstrip('\n'))
 
     def parent_check(self):
         try:
@@ -261,6 +261,20 @@ class Arbiter(object):
                     "error in arbiter's log_children:\n"
                     + traceback.format_exc())
 
+    def _ensure_pgrp(self):
+        """Ensures that the pgrp file is present and up to date. There have
+        been production cases where the file was lost or not
+        immediately emitted due to disk space issues.
+        """
+        if not LAST_PGRP_PATH:  # global
+            return
+        try:
+            with open(LAST_PGRP_PATH, 'w') as f:
+                f.write(str(os.getpgrp()) + "\n")
+        except IOError:
+            # raised if no permissions or disk space
+            pass
+
     def run(self, repl=True):
         self.workers = {}
         if repl:
@@ -289,6 +303,8 @@ class Arbiter(object):
                 self._cull_workers()
                 self._reap()
                 time.sleep(1.0)
+                if int(time.time()) % 30 == 0:
+                    self._ensure_pgrp()
         finally:
             try:
                 self.printfunc('shutting down arbiter ' + repr(self))
@@ -360,6 +376,7 @@ _init_exit_code_names()
 
 def spawn_daemon(fork=None, pgrpfile=None, outfile='out.txt'):
     'causes run to be executed in a newly spawned daemon process'
+    global LAST_PGRP_PATH
     fork = fork or os.fork
     open(outfile, 'a').close()  # TODO: configurable output file
     if pgrpfile and os.path.exists(pgrpfile):
@@ -375,6 +392,7 @@ def spawn_daemon(fork=None, pgrpfile=None, outfile='out.txt'):
         os.setsid()  # break association with terminal via new session id
         if fork():  # fork one more layer to ensure child will not re-acquire terminal
             os._exit(0)
+        LAST_PGRP_PATH = pgrpfile
         if pgrpfile:
             with open(pgrpfile, 'w') as f:
                 f.write(str(os.getpgrp()) + "\n")
@@ -518,3 +536,4 @@ def serve_wsgiref_thread(wsgi, host, port):
 
 
 LAST_ARBITER = None
+LAST_PGRP_PATH = None
