@@ -133,7 +133,7 @@ class Worker(object):
         if self.last_update is None:
             if time.time() - self.start_time > CHILD_START_TIMEOUT:
                 timeout = True
-        if time.time() - self.last_update > TIMEOUT:
+        elif time.time() - self.last_update > TIMEOUT:
             timeout = True
         if timeout:
             self.arbiter.printfunc("worker timed out" + str(self.pid))
@@ -309,7 +309,7 @@ class Arbiter(object):
                 for worker_id in range(self.size):
                     if worker_id in self.workers:
                         continue
-                    if self.no_ping_children >= self.max_no_ping_children:
+                    if len(self.no_ping_children) >= self.max_no_ping_children:
                         break
                     worker = Worker(self, worker_id)
                     worker.fork_and_run()
