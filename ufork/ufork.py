@@ -16,6 +16,8 @@ import traceback
 import select
 
 TIMEOUT = 10.0
+# grace period before timeout is applied for post_fork initialization
+CHILD_START_TIMEOUT = 10 * 60.0
 CUR_WORKER = None
 
 
@@ -25,7 +27,8 @@ class Worker(object):
         self.stopping = False
         self.sock = None
         self.pid = None
-        self.last_update = time.time()
+        self.last_update = None
+        self.start_time = time.time()
         self.worker_id = index
 
     def fork_and_run(self):
@@ -126,7 +129,13 @@ class Worker(object):
         except OSError:
             self.arbiter.printfunc("worker died " + str(self.pid))
             return False
+        timeout = False
+        if self.last_update is None:
+            if time.time() - self.start_time > CHILD_START_TIMEOUT:
+                timeout = True
         if time.time() - self.last_update > TIMEOUT:
+            timeout = True
+        if timeout:
             self.arbiter.printfunc("worker timed out" + str(self.pid))
             self.arbiter.timed_out_children += 1
             total_children, timed_out_children, last_logged_child_issue = \
@@ -183,7 +192,7 @@ class Arbiter(object):
     '''
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
                  size=None, sleep=None, fork=None, printfunc=None,
-                 child_memlimit=2**30, extra=None):
+                 child_memlimit=2**30, max_no_ping_children=1, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -192,6 +201,8 @@ class Arbiter(object):
         self.size = size
         self.sleep = sleep or time.sleep
         self.fork = fork or os.fork
+        self.no_ping_children = set()  # children which have not yet pinged back
+        self.max_no_ping_children = max_no_ping_children
         self.printfunc = printfunc or _printfunc
         self.child_memlimit = child_memlimit
         self.extra = extra  # a place to put additional data for CLI
@@ -292,14 +303,19 @@ class Arbiter(object):
         try:
             self.printfunc('starting arbiter ' + repr(self) + ' ' + str(os.getpid()))
             while not self.stopping:
+                self.no_ping_children = set(
+                    [e for e in self.no_ping_children if e.last_update is None])
                 #spawn additional workers as needed
                 for worker_id in range(self.size):
                     if worker_id in self.workers:
                         continue
+                    if self.no_ping_children >= self.max_no_ping_children:
+                        break
                     worker = Worker(self, worker_id)
                     worker.fork_and_run()
                     self.printfunc('started worker ' + str(worker.pid))
                     self.workers[worker_id] = worker
+                    self.no_ping_children.add(worker)
                 self._cull_workers()
                 self._reap()
                 time.sleep(1.0)
