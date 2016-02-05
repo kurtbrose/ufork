@@ -47,6 +47,7 @@ class Worker(object):
         #in child fork
         global CUR_WORKER
         CUR_WORKER = self
+        self.arbiter.in_child = True
         try:
             parent_io.close()
             parent_health.close()
@@ -100,12 +101,15 @@ class Worker(object):
             finally:
                 if self.arbiter.child_pre_exit:
                     self.arbiter.child_pre_exit()
+        except SystemExit:
+            self.arbiter.printfunc("worker shutting down with SystemExit")
+            raise
         except:
             self.arbiter.printfunc("worker shutting down with error")
             self.arbiter.printfunc(traceback.format_exc())
-            os._exit(1)  # prevent arbiter code from executing in child
-        finally:
-            os._exit(0)  # prevent arbiter code from executing in child
+            raise SystemExit(1)  # prevent arbiter code from executing in child
+        else:
+            raise SystemExit()  # prevent arbiter code from executing in child
 
     def parent_print_io(self):
         try:
@@ -213,6 +217,7 @@ class Arbiter(object):
         self.total_children = 0
         self.timed_out_children = 0
         self.last_logged_child_issue = 0
+        self.in_child = False
 
     def spawn_thread(self):
         'causes run to be executed in a thread'
@@ -322,29 +327,33 @@ class Arbiter(object):
                 if int(time.time()) % 30 == 0:
                     self._ensure_pgrp()
         finally:
-            try:
-                self.printfunc('shutting down arbiter ' + repr(self))
-                if self.parent_pre_stop:
-                    self.parent_pre_stop()  # hope this doesn't error
-                #give workers the opportunity to shut down cleanly
-                for worker in self.workers.values():
-                    worker.parent_notify_stop()
-                shutdown_time = time.time()
-                while self.workers and time.time() < shutdown_time + TIMEOUT:
-                    self._cull_workers()
-                    self._reap()
-                    time.sleep(1.0)
-                #if workers have not shut down cleanly by now, kill them
-                for w in self.workers.values():
-                    w.parent_kill()
-                self._reap()
-            except:
-                self.printfunc("warning, arbiter shutdown had exception: " + traceback.format_exc())
-            finally:
-                if repl:
-                    self.stdin_handler.stop()
-                else:
-                    os._exit(0)  # in case arbiter was daemonized, exit here
+            if not self.in_child:  # just let child SystemExit raise
+                try:
+                    self._shutdown_all_workers()
+                except:
+                    self.printfunc("warning, arbiter shutdown had exception: " + traceback.format_exc())
+                finally:
+                    if repl:
+                        self.stdin_handler.stop()
+                    else:
+                        raise SystemExit()  # in case arbiter was daemonized, exit here
+
+    def _shutdown_all_workers(self):
+        self.printfunc('shutting down arbiter ' + repr(self))
+        if self.parent_pre_stop:
+            self.parent_pre_stop()  # hope this doesn't error
+        #give workers the opportunity to shut down cleanly
+        for worker in self.workers.values():
+            worker.parent_notify_stop()
+        shutdown_time = time.time()
+        while self.workers and time.time() < shutdown_time + TIMEOUT:
+            self._cull_workers()
+            self._reap()
+            time.sleep(1.0)
+        #if workers have not shut down cleanly by now, kill them
+        for w in self.workers.values():
+             w.parent_kill()
+        self._reap()
 
     def _cull_workers(self):  # remove workers which have died from self.workers
         for worker_id, worker in self.workers.items():
