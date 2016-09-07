@@ -326,6 +326,10 @@ class Arbiter(object):
                 time.sleep(1.0)
                 if int(time.time()) % 30 == 0:
                     self._ensure_pgrp()
+        except Exception:
+            self.printfunc('arbiter loop exiting due to: ' + traceback.format_exc())
+        else:
+            self.printfunc('aribter loop exiting without exception, self.stopping=' + repr(self.stopping))
         finally:
             if not self.in_child:  # just let child SystemExit raise
                 try:
