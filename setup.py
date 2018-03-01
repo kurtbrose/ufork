@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name = "ufork",
-    version = "0.0.1",
+    version = "18.2.1",
     author = "Kurt Rose",
     author_email = "kurt@kurtrose.com",
     description = "A simple pre-forking container",
@@ -16,3 +16,4 @@ setup(
         'License :: OSI Approved :: BSD License',
     ],
 )
+
