@@ -83,7 +83,7 @@ class Worker(object):
                         res = resource.getrusage(resource.RUSAGE_SELF)
                         if res.ru_maxrss * 1024 > self.arbiter.child_memlimit:
                             raise OSError("memory usage {1} * {2} exceeded limit"
-                                          " {0} MiB".format(self.arbiter.child_memlimit/1024,
+                                          " {0} MiB".format(self.arbiter.child_memlimit/1024/1024,
                                                             res.ru_maxrss,
                                                             1024))
                         if check_fd:
