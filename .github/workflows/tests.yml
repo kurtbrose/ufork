@@ -15,7 +15,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest tox
+        pip install tox
     - name: Pytest with coverage
       run: |
         tox
