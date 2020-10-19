@@ -44,7 +44,8 @@ class Worker(object):
             child_health.close()
             self.arbiter.total_children += 1
             return
-        #in child fork
+
+        # in child fork
         global CUR_WORKER
         CUR_WORKER = self
         self.arbiter.in_child = True
