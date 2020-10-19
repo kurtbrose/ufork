@@ -3,6 +3,7 @@ import threading
 import time
 import urllib2
 
+from tests.utils import check_leaked_workers
 from ufork import Arbiter
 
 import wsgiref.simple_server
@@ -46,3 +47,5 @@ def test_wsgiref_hello():
     time.sleep(5)
     assert arbiter.dead_workers[0].pid == worker.pid
     assert arbiter.workers == {}
+
+    check_leaked_workers(arbiter)

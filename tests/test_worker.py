@@ -1,9 +1,9 @@
-import os
 import time
 import threading
 import thread
 
 import ufork
+from tests.utils import check_leaked_workers
 
 
 def suicide_worker():
@@ -29,13 +29,5 @@ def test_worker_cycle_test():
     arbiter_thread.join()
     time.sleep(1)  # give OS a chance to finish killing all child workers
     assert arbiter.dead_workers
-    print arbiter.dead_workers
-    leaked_workers = []
-    for worker in arbiter.workers.values():
-        try:  # check if process still exists
-            os.kill(worker.pid, 0)
-            leaked_workers.append(worker.pid)
-        except OSError:
-            pass  # good, worker dead
-    if leaked_workers:
-        raise Exception("leaked workers: " + repr(leaked_workers))
+
+    check_leaked_workers(arbiter)
