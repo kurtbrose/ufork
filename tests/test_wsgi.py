@@ -38,7 +38,7 @@ def test_wsgiref_hello():
     arbiter.spawn_thread()
     arbiter_thread.daemon = True
     arbiter_thread.start()
-    time.sleep(2)  # Todo: Find another way to wait until server is ready to accept requests.
+    time.sleep(5)  # Todo: Find another way to wait until server is ready to accept requests.
     assert len(arbiter.workers) == 1
     response = urllib2.urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
     assert response == 'Hello World\n'
