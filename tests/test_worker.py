@@ -1,14 +1,15 @@
+from __future__ import absolute_import
 import time
 import threading
-import thread
-import ufork
+import six.moves._thread
 from tests.utils import check_leaked_workers
+from ufork import Arbiter
 
 
 def suicide_worker():
     def die_soon():
         time.sleep(2)
-        thread.interrupt_main()  # sys.exit(0)
+        six.moves._thread.interrupt_main()  # sys.exit(0)
 
     suicide_thread = threading.Thread(target=die_soon)
     suicide_thread.daemon = True
@@ -16,7 +17,7 @@ def suicide_worker():
 
 
 def test_worker_cycle_test():
-    arbiter = ufork.ufork.Arbiter(post_fork=suicide_worker)
+    arbiter = Arbiter(post_fork=suicide_worker)
     arbiter_thread = threading.Thread(target=arbiter.run)
     arbiter_thread.daemon = True
     arbiter_thread.start()

@@ -1,3 +1,4 @@
+from pkg_resources import parse_requirements
 from setuptools import setup
 
 setup(
@@ -14,4 +15,5 @@ setup(
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: BSD License',
     ],
+    install_requires=["six"]
 )

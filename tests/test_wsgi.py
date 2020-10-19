@@ -1,7 +1,8 @@
+from __future__ import absolute_import
 import socket
 import threading
 import time
-import urllib2
+import six.moves.urllib.request, six.moves.urllib.error, six.moves.urllib.parse
 
 from tests.utils import check_leaked_workers
 from ufork import Arbiter
@@ -9,7 +10,7 @@ from ufork import Arbiter
 import wsgiref.simple_server
 
 SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 7777
+SERVER_PORT = 7775
 
 
 def test_wsgiref_hello():
@@ -38,14 +39,13 @@ def test_wsgiref_hello():
     arbiter.spawn_thread()
     arbiter_thread.daemon = True
     arbiter_thread.start()
-    time.sleep(5)  # Todo: Find another way to wait until server is ready to accept requests.
+    time.sleep(10)  # Todo: Find another way to wait until server is ready to accept requests.
     assert len(arbiter.workers) == 1
-    response = urllib2.urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
+    response = six.moves.urllib.request.urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
     assert response == 'Hello World\n'
     worker = arbiter.workers[0]
     arbiter.stop()
-    time.sleep(5)
-    assert arbiter.dead_workers[0].pid == worker.pid
-    assert arbiter.workers == {}
-
+    time.sleep(10)
     check_leaked_workers(arbiter)
+    assert arbiter.dead_workers.pop().pid == worker.pid
+    assert arbiter.workers == {}
