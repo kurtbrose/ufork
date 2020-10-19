@@ -98,7 +98,7 @@ class Worker(object):
                                 raise OSError("open fd count {0} too close"
                                               " to fd limit {1}".format(fd_count, fd_limit))
                             num_open_fds = len(os.listdir('/proc/{0}/fd'.format(pid)))
-                    child_health.send('\0')
+                    child_health.send(b'\0')
                     self.arbiter.sleep(1.0)
             except Exception as e:
                 self.arbiter.printfunc("worker error " + repr(e))
