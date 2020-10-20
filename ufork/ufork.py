@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+from __future__ import print_function
 import code
 import errno
 import logging
@@ -14,6 +16,8 @@ from collections import deque, namedtuple
 from logging.handlers import SysLogHandler
 from multiprocessing import cpu_count
 from random import seed  # re-seed random number generator post-fork
+from six.moves import range
+from six.moves import zip
 
 TIMEOUT = 10.0
 # grace period before timeout is applied for post_fork initialization
@@ -94,7 +98,7 @@ class Worker(object):
                                 raise OSError("open fd count {0} too close"
                                               " to fd limit {1}".format(fd_count, fd_limit))
                             num_open_fds = len(os.listdir('/proc/{0}/fd'.format(pid)))
-                    child_health.send('\0')
+                    child_health.send(b'\0')
                     self.arbiter.sleep(1.0)
             except Exception as e:
                 self.arbiter.printfunc("worker error " + repr(e))
@@ -151,7 +155,7 @@ class Worker(object):
                 self.arbiter.printfunc("Most children are wedging!  {0} time outs, {1} total".format(
                     timed_out_children, total_children))
             self.parent_kill()
-            print 'returning false for', self.pid
+            print('returning false for', self.pid)
             return False
         return True
 
@@ -362,7 +366,7 @@ class Arbiter(object):
         self._reap()
 
     def _cull_workers(self):  # remove workers which have died from self.workers
-        for worker_id, worker in self.workers.items():
+        for worker_id, worker in list(self.workers.items()):
             if not worker.parent_check():
                 # don't leak sockets
                 worker.child_io.close()
@@ -389,7 +393,7 @@ class Arbiter(object):
 
 
 def _printfunc(msg):
-    print msg
+    print(msg)
 
 
 DeadWorker = namedtuple('dead', 'pid code name')
@@ -471,7 +475,7 @@ class RotatingStdoutFile(object):
         # rotate previous files if they exist
         files = [self.path] + [self.path + "." + str(i)
                                for i in range(1, self.num_files)]
-        for src, dst in reversed(zip(files[:-1], files[1:])):
+        for src, dst in reversed(list(zip(files[:-1], files[1:]))):
             if os.path.exists(src):
                 os.rename(src, dst)
         # hold onto previous fd
@@ -497,11 +501,11 @@ class StdinHandler(object):
 
     def _interact(self):
         sys.stdout.flush()
-        print ''  # newline on startup to clear prompt
+        print('')  # newline on startup to clear prompt
         while not self.stopping:
             inp = self.console.raw_input('ufork>> ')
             self.console.runsource(inp)
-        print ''  # newline after done to clear prompt
+        print('')  # newline after done to clear prompt
         sys.stdout.flush()
 
     def start(self):

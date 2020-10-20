@@ -14,4 +14,5 @@ setup(
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: BSD License',
     ],
+    install_requires=["six"]
 )
