@@ -366,7 +366,7 @@ class Arbiter(object):
         self._reap()
 
     def _cull_workers(self):  # remove workers which have died from self.workers
-        for worker_id, worker in self.workers.items():
+        for worker_id, worker in list(self.workers.items()):
             if not worker.parent_check():
                 # don't leak sockets
                 worker.child_io.close()

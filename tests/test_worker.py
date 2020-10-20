@@ -18,7 +18,7 @@ def suicide_worker():
 
 def test_worker_cycle_test():
     arbiter = Arbiter(post_fork=suicide_worker)
-    arbiter_thread = threading.Thread(target=arbiter.run)
+    arbiter_thread = threading.Thread(target=arbiter.run, kwargs={"repl": False})
     arbiter_thread.daemon = True
     arbiter_thread.start()
     time.sleep(6)  # give some time for workers to die

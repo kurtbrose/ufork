@@ -12,4 +12,4 @@ def check_leaked_workers(arbiter):
         except OSError:
             pass  # good, worker dead
     if leaked_workers:
-        raise Exception("leaked workers: " + repr(leaked_workers))
+        raise AssertionError("leaked workers: " + repr(leaked_workers))
