@@ -39,7 +39,7 @@ def test_wsgiref_hello():
     arbiter.spawn_thread()
     arbiter_thread.daemon = True
     arbiter_thread.start()
-    time.sleep(5)  # Todo: Find another way to wait until server is ready to accept requests.
+    time.sleep(10)  # Todo: Find another way to wait until server is ready to accept requests.
     assert len(arbiter.workers) == 1
     response = six.moves.urllib.request.urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
     if six.PY3:
@@ -48,5 +48,5 @@ def test_wsgiref_hello():
         assert response == 'Hello World\n'
     arbiter.stopping = True
     arbiter_thread.join()
-    time.sleep(1)
+    time.sleep(3)
     check_leaked_workers(arbiter)
