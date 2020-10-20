@@ -1,4 +1,3 @@
-from pkg_resources import parse_requirements
 from setuptools import setup
 
 setup(
