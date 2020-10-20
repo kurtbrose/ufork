@@ -48,4 +48,5 @@ def test_wsgiref_hello():
         assert response == 'Hello World\n'
     arbiter.stopping = True
     arbiter_thread.join()
+    time.sleep(1)
     check_leaked_workers(arbiter)
