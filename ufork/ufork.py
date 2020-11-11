@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 from __future__ import print_function
+import atexit
 import code
 import errno
 import logging
@@ -225,6 +226,7 @@ class Arbiter(object):
         global LAST_ARBITER
         LAST_ARBITER = self  # for testing/debugging, a hook to get a global pointer
 
+        self.stdin_handler = None
         self.total_children = 0
         self.timed_out_children = 0
         self.last_logged_child_issue = 0
@@ -311,11 +313,10 @@ class Arbiter(object):
 
     def run(self, repl=True):
         self.workers = {}
-        if repl:
+        if repl and sys.stdin.isatty():
             self.stdin_handler = StdinHandler(self)
             self.stdin_handler.start()
-        else:
-            self.stdin_handler = None
+
         self.stopping = False  # for manual stopping
         self.dead_workers = deque(maxlen=10)
 
@@ -359,7 +360,7 @@ class Arbiter(object):
                 except Exception:
                     self.printfunc("warning, arbiter shutdown had exception: " + traceback.format_exc())
                 finally:
-                    if repl:
+                    if self.stdin_handler:
                         self.stdin_handler.stop()
                     else:
                         raise SystemExit()  # in case arbiter was daemonized, exit here
@@ -536,14 +537,46 @@ class StdinHandler(object):
         sys.stdout.flush()
 
     def start(self):
-        if self.stopping:
+        if self.read_thread or self.stopping:
             raise Exception("%s is not restartable" % self.__class__.__name__)
+        atexit.register(enable_tty_echo)
         self.read_thread = threading.Thread(target=self._interact)
         self.read_thread.daemon = True
         self.read_thread.start()
 
     def stop(self):
         self.stopping = True
+
+
+def enable_tty_echo(tty=None):
+    """Re-enables proper console behavior after a signal or
+    keyboardinterrupt. otherwise readline leaves the terminal in a
+    messy state.
+
+    copied from clastic/server.py
+    """
+    if tty is None:
+        tty = sys.stdin
+    if not tty.isatty():
+        return
+    try:
+        import termios
+    except ImportError:
+        return
+
+    attr_list = termios.tcgetattr(tty)
+    attr_list[3] |= termios.ECHO
+    try:
+        orig_handler = signal.getsignal(signal.SIGTTOU)
+    except AttributeError:
+        termios.tcsetattr(tty, termios.TCSANOW, attr_list)
+    else:
+        try:
+            signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+            termios.tcsetattr(tty, termios.TCSANOW, attr_list)
+        finally:
+            signal.signal(signal.SIGTTOU, orig_handler)
+    return
 
 
 try:
