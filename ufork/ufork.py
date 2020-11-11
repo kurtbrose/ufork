@@ -70,7 +70,10 @@ class Worker(object):
             if self.arbiter.child_console:
                 self.stdin_handler = StdinHandler(self)
                 self.stdin_handler.start()
-            self.arbiter.post_fork()
+            try:
+                self.arbiter.post_fork()
+            except KeyboardInterrupt:
+                sys.exit(0)
             failed = False
             try:
                 self.arbiter.printfunc('worker starting ' + str(pid))
@@ -227,8 +230,8 @@ class Arbiter(object):
         cn = self.__class__.__name__
         pf = self.post_fork
         pfn = getattr(pf, '__qualname__', getattr(pf, '__name__', repr(pf)))
-        tmpl = '<%s #%s post_fork=%s size=%s>'
-        return tmpl % (cn, id(self), pfn, self.size)
+        tmpl = '<%s size=%s post_fork=%s id=%s>'
+        return tmpl % (cn, self.size, pfn, id(self))
 
     def spawn_thread(self):
         'causes run to be executed in a thread'
@@ -260,7 +263,7 @@ class Arbiter(object):
         while True:
             try:
                 worker_ios = dict((worker.child_io, worker)
-                                  for worker in self.workers.values())
+                                  for worker in list(self.workers.values()))
                 try:
                     readable, _, _ = select.select(worker_ios,
                                                    [], [], 0.1)
@@ -334,7 +337,11 @@ class Arbiter(object):
                     self.no_ping_children.add(worker)
                 self._cull_workers()
                 self._reap()
-                time.sleep(1.0)
+                try:
+                    time.sleep(1.0)
+                except KeyboardInterrupt:
+                    self.stopping = True
+                    sys.exit(0)
                 if int(time.time()) % 30 == 0:
                     self._ensure_pgrp()
         except Exception:
@@ -366,7 +373,7 @@ class Arbiter(object):
             self._reap()
             time.sleep(1.0)
         # if workers have not shut down cleanly by now, kill them
-        for w in self.workers.values():
+        for w in list(self.workers.values()):
             w.parent_kill()
         self._reap()
 
@@ -511,8 +518,10 @@ class StdinHandler(object):
         while not self.stopping:
             try:
                 inp = self.console.raw_input('ufork>> ')
+            except KeyboardInterrupt:
+                print('wuhoh!!!')
             except EOFError:
-                print('\n .. got EOF: stdin closed. stopping ufork console.')
+                print('\n .. got EOF: stdin closed. stopping ufork console. (Ctrl+C to interrupt)')
                 self.stopping = True
                 break
             else:
