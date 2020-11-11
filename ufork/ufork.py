@@ -1,19 +1,21 @@
-import os
-import sys
-import time
-import socket
-from multiprocessing import cpu_count
-import threading
+from __future__ import absolute_import
+from __future__ import print_function
 import code
-import signal
-import resource
 import errno
-from random import seed  # re-seed random number generator post-fork
-from collections import deque, namedtuple
 import logging
-from logging.handlers import SysLogHandler
-import traceback
+import os
+import resource
 import select
+import signal
+import socket
+import sys
+import threading
+import time
+import traceback
+from collections import deque, namedtuple
+from logging.handlers import SysLogHandler
+from multiprocessing import cpu_count
+from random import seed  # re-seed random number generator post-fork
 
 TIMEOUT = 10.0
 # grace period before timeout is applied for post_fork initialization
@@ -44,7 +46,8 @@ class Worker(object):
             child_health.close()
             self.arbiter.total_children += 1
             return
-        #in child fork
+
+        # in child fork
         global CUR_WORKER
         CUR_WORKER = self
         self.arbiter.in_child = True
@@ -55,13 +58,13 @@ class Worker(object):
                           lambda signal, frame: self.child_stop())
             pid = os.getpid()
             self.child_close_fds()
-            #TODO: should these go to UDP port 514? (syslog) set
-            #stdout and stderr filenos to point to the child end of
-            #the socket-pair
+            # TODO: should these go to UDP port 514? (syslog) set
+            # stdout and stderr filenos to point to the child end of
+            # the socket-pair
             os.dup2(child_io.fileno(), 0)
             os.dup2(child_io.fileno(), 1)
             os.dup2(child_io.fileno(), 2)
-            #TODO: prevent blocking when stdout buffer full?
+            # TODO: prevent blocking when stdout buffer full?
             # (SockFile class provides this behavior)
             seed()  # re-seed random number generator post-fork
             if self.arbiter.child_console:
@@ -70,20 +73,20 @@ class Worker(object):
             self.arbiter.post_fork()
             failed = False
             try:
-                self.arbiter.printfunc('worker starting '+str(pid))
+                self.arbiter.printfunc('worker starting ' + str(pid))
                 fd_path = '/proc/{0}/fd'.format(pid)
                 check_fd = os.path.exists(fd_path)
                 while not self.stopping:
                     try:
                         os.kill(ppid, 0)  # check parent process exists
                     except OSError as e:
-                        self.arbiter.printfunc("worker parent died "+str(ppid))
+                        self.arbiter.printfunc("worker parent died " + str(ppid))
                         break
                     if os.uname()[0] != 'Darwin':
                         res = resource.getrusage(resource.RUSAGE_SELF)
                         if res.ru_maxrss * 1024 > self.arbiter.child_memlimit:
                             raise OSError("memory usage {1} * {2} exceeded limit"
-                                          " {0} MiB".format(self.arbiter.child_memlimit/1024/1024,
+                                          " {0} MiB".format(self.arbiter.child_memlimit / 1024 / 1024,
                                                             res.ru_maxrss,
                                                             1024))
                         if check_fd:
@@ -93,7 +96,7 @@ class Worker(object):
                                 raise OSError("open fd count {0} too close"
                                               " to fd limit {1}".format(fd_count, fd_limit))
                             num_open_fds = len(os.listdir('/proc/{0}/fd'.format(pid)))
-                    child_health.send('\0')
+                    child_health.send(b'\0')
                     self.arbiter.sleep(1.0)
             except Exception as e:
                 self.arbiter.printfunc("worker error " + repr(e))
@@ -150,7 +153,7 @@ class Worker(object):
                 self.arbiter.printfunc("Most children are wedging!  {0} time outs, {1} total".format(
                     timed_out_children, total_children))
             self.parent_kill()
-            print 'returning false for', self.pid
+            print('returning false for', self.pid)
             return False
         return True
 
@@ -187,16 +190,17 @@ def cur_worker_id():
     return None
 
 
-#SIGINT and SIGTERM mean shutdown cleanly
+# SIGINT and SIGTERM mean shutdown cleanly
 
 
 class Arbiter(object):
     '''
     Object for managing a group of worker processes.
     '''
+
     def __init__(self, post_fork, child_pre_exit=None, parent_pre_stop=None,
                  size=None, sleep=None, fork=None, printfunc=None,
-                 child_memlimit=2**30, max_no_ping_children=1, extra=None):
+                 child_memlimit=2 ** 30, max_no_ping_children=1, extra=None):
         self.post_fork = post_fork
         self.child_pre_exit = child_pre_exit
         self.parent_pre_stop = parent_pre_stop
@@ -310,7 +314,7 @@ class Arbiter(object):
             while not self.stopping:
                 self.no_ping_children = set(
                     [e for e in self.no_ping_children if e.last_update is None])
-                #spawn additional workers as needed
+                # spawn additional workers as needed
                 for worker_id in range(self.size):
                     if worker_id in self.workers:
                         continue
@@ -346,7 +350,7 @@ class Arbiter(object):
         self.printfunc('shutting down arbiter ' + repr(self))
         if self.parent_pre_stop:
             self.parent_pre_stop()  # hope this doesn't error
-        #give workers the opportunity to shut down cleanly
+        # give workers the opportunity to shut down cleanly
         for worker in self.workers.values():
             worker.parent_notify_stop()
         shutdown_time = time.time()
@@ -354,13 +358,13 @@ class Arbiter(object):
             self._cull_workers()
             self._reap()
             time.sleep(1.0)
-        #if workers have not shut down cleanly by now, kill them
+        # if workers have not shut down cleanly by now, kill them
         for w in self.workers.values():
-             w.parent_kill()
+            w.parent_kill()
         self._reap()
 
     def _cull_workers(self):  # remove workers which have died from self.workers
-        for worker_id, worker in self.workers.items():
+        for worker_id, worker in list(self.workers.items()):
             if not worker.parent_check():
                 # don't leak sockets
                 worker.child_io.close()
@@ -387,7 +391,7 @@ class Arbiter(object):
 
 
 def _printfunc(msg):
-    print msg
+    print(msg)
 
 
 DeadWorker = namedtuple('dead', 'pid code name')
@@ -398,6 +402,7 @@ def _init_exit_code_names():
     for name in [a for a in dir(posix) if "EX_" in a]:
         value = getattr(posix, name)
         EXIT_CODE_NAMES[value] = name
+
 
 EXIT_CODE_NAMES = {}
 _init_exit_code_names()
@@ -441,7 +446,8 @@ class RotatingStdoutFile(object):
     NOTE: there are a variety of schemes possible here, fd rotation was chosen
     for its simplicity.
     '''
-    def __init__(self, path, num_files=8, file_size=2**23):
+
+    def __init__(self, path, num_files=8, file_size=2 ** 23):
         self.path = path
         self.num_files = num_files
         self.file_size = file_size
@@ -467,7 +473,7 @@ class RotatingStdoutFile(object):
         # rotate previous files if they exist
         files = [self.path] + [self.path + "." + str(i)
                                for i in range(1, self.num_files)]
-        for src, dst in reversed(zip(files[:-1], files[1:])):
+        for src, dst in reversed(list(zip(files[:-1], files[1:]))):
             if os.path.exists(src):
                 os.rename(src, dst)
         # hold onto previous fd
@@ -482,6 +488,7 @@ class RotatingStdoutFile(object):
 
 class StdinHandler(object):
     'provides command-line interaction for Arbiter'
+
     def __init__(self, repl_self):
         self.repl_self = repl_self
         self.stopping = False
@@ -492,11 +499,11 @@ class StdinHandler(object):
 
     def _interact(self):
         sys.stdout.flush()
-        print ''  # newline on startup to clear prompt
+        print('')  # newline on startup to clear prompt
         while not self.stopping:
             inp = self.console.raw_input('ufork>> ')
             self.console.runsource(inp)
-        print ''  # newline after done to clear prompt
+        print('')  # newline after done to clear prompt
         sys.stdout.flush()
 
     def start(self):
@@ -509,6 +516,7 @@ class StdinHandler(object):
     def stop(self):
         self.stopping = True
 
+
 try:
     import gevent
 except:
@@ -516,6 +524,7 @@ except:
 else:
     import gevent.pywsgi
     import gevent.socket
+
 
     class GeventWsgiArbiter(Arbiter):
         def __init__(self, wsgi, address, stop_timeout=30):
@@ -536,6 +545,7 @@ else:
                              child_pre_exit=self.server.stop,
                              parent_pre_stop=close_sock,
                              sleep=gevent.sleep, fork=gevent.fork)
+
 
     def serve_wsgi_gevent(wsgi, address, stop_timeout=30):
         GeventWsgiArbiter(wsgi, address, stop_timeout).run()
