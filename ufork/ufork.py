@@ -107,7 +107,7 @@ class Worker(object):
         except SystemExit:
             self.arbiter.printfunc("worker shutting down with SystemExit")
             raise
-        except:
+        except Exception:
             self.arbiter.printfunc("worker shutting down with error")
             self.arbiter.printfunc(traceback.format_exc())
             raise SystemExit(1)  # prevent arbiter code from executing in child
@@ -122,7 +122,7 @@ class Worker(object):
         else:
             self.last_update = time.time()
             if data:
-                self.arbiter.printfunc(str(self.pid) + ':' + data.rstrip('\n'))
+                self.arbiter.printfunc(str(self.pid) + ':' + repr(data))
 
     def parent_check(self):
         try:
@@ -223,6 +223,13 @@ class Arbiter(object):
         self.last_logged_child_issue = 0
         self.in_child = False
 
+    def __repr__(self):
+        cn = self.__class__.__name__
+        pf = self.post_fork
+        pfn = getattr(pf, '__qualname__', getattr(pf, '__name__', repr(pf)))
+        tmpl = '<%s #%s post_fork=%s size=%s>'
+        return tmpl % (cn, id(self), pfn, self.size)
+
     def spawn_thread(self):
         'causes run to be executed in a thread'
         self.thread = threading.Thread(target=self.run, args=(False,))
@@ -310,7 +317,7 @@ class Arbiter(object):
         self.io_log_thread.start()
 
         try:
-            self.printfunc('starting arbiter ' + repr(self) + ' ' + str(os.getpid()))
+            self.printfunc('starting arbiter ' + repr(self) + ' with PID: ' + str(os.getpid()))
             while not self.stopping:
                 self.no_ping_children = set(
                     [e for e in self.no_ping_children if e.last_update is None])
@@ -338,7 +345,7 @@ class Arbiter(object):
             if not self.in_child:  # just let child SystemExit raise
                 try:
                     self._shutdown_all_workers()
-                except:
+                except Exception:
                     self.printfunc("warning, arbiter shutdown had exception: " + traceback.format_exc())
                 finally:
                     if repl:
@@ -499,16 +506,23 @@ class StdinHandler(object):
 
     def _interact(self):
         sys.stdout.flush()
+        time.sleep(1.0)
         print('')  # newline on startup to clear prompt
         while not self.stopping:
-            inp = self.console.raw_input('ufork>> ')
-            self.console.runsource(inp)
+            try:
+                inp = self.console.raw_input('ufork>> ')
+            except EOFError:
+                print('\n .. got EOF: stdin closed. stopping ufork console.')
+                self.stopping = True
+                break
+            else:
+                self.console.runsource(inp)
         print('')  # newline after done to clear prompt
         sys.stdout.flush()
 
     def start(self):
         if self.stopping:
-            raise Exception("StdinHandler is not restartable")
+            raise Exception("%s is not restartable" % self.__class__.__name__)
         self.read_thread = threading.Thread(target=self._interact)
         self.read_thread.daemon = True
         self.read_thread.start()
