@@ -1,7 +1,14 @@
 from __future__ import absolute_import
+
+import sys
 import time
 import threading
-import six.moves._thread
+
+try:
+    import _thread as thread
+except ImportError:
+    import thread  # py3
+
 from tests.utils import check_leaked_workers
 from ufork import Arbiter
 
@@ -9,7 +16,7 @@ from ufork import Arbiter
 def suicide_worker():
     def die_soon():
         time.sleep(2)
-        six.moves._thread.interrupt_main()  # sys.exit(0)
+        thread.interrupt_main()  # sys.exit(0)
 
     suicide_thread = threading.Thread(target=die_soon)
     suicide_thread.daemon = True

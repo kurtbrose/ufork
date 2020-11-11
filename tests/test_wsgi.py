@@ -1,13 +1,17 @@
 from __future__ import absolute_import
-import threading
+
+import sys
 import time
-import six.moves.urllib.request, six.moves.urllib.error, six.moves.urllib.parse
-
-from ufork import Arbiter
-
+import threading
 from wsgiref.simple_server import make_server
 
-from tests.utils import check_leaked_workers
+try:
+    from urllib2 import urlopen
+except ImportError:
+    from urllib.request import urlopen  # py3
+
+from ufork import Arbiter
+from .utils import check_leaked_workers
 
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 7777
@@ -39,8 +43,8 @@ def test_wsgiref_hello():
     arbiter.spawn_thread()
     time.sleep(3)  # Todo: Find another way to wait until server is ready to accept requests.
     try:
-        response = six.moves.urllib.request.urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
-        if six.PY3:
+        response = urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
+        if sys.version_info[0] == 3:
             assert response == b'Hello World\n'
         else:
             assert response == 'Hello World\n'

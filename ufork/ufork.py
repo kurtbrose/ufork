@@ -16,8 +16,6 @@ from collections import deque, namedtuple
 from logging.handlers import SysLogHandler
 from multiprocessing import cpu_count
 from random import seed  # re-seed random number generator post-fork
-from six.moves import range
-from six.moves import zip
 
 TIMEOUT = 10.0
 # grace period before timeout is applied for post_fork initialization
