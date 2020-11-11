@@ -1,7 +1,6 @@
 # install ufork and run with "python example.py"
 
 import os
-import threading
 from wsgiref.simple_server import make_server
 
 from ufork import Arbiter

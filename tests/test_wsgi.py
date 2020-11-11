@@ -12,9 +12,6 @@ except ImportError:
 from ufork import Arbiter
 from .utils import check_leaked_workers
 
-SERVER_HOST = "0.0.0.0"
-SERVER_PORT = 7777
-
 
 def wsgi_app(environ, start_response):
     status = '200 OK'
@@ -24,8 +21,9 @@ def wsgi_app(environ, start_response):
     yield b"Hello World\n"
 
 
-httpd = make_server(SERVER_HOST, SERVER_PORT, wsgi_app)
-
+# port = 0, autoassign. allows for parallel execution.
+httpd = make_server('0.0.0.0', 0, wsgi_app)
+_address, _port = httpd.socket.getsockname()  # port autoassigned
 
 def start_server():
     w = threading.Thread(target=httpd.serve_forever)
@@ -42,7 +40,7 @@ def test_wsgiref_hello():
     arbiter.spawn_thread()
     time.sleep(3)  # Todo: Find another way to wait until server is ready to accept requests.
     try:
-        response = urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
+        response = urlopen('http://{}:{}'.format(_address, _port)).read()
         assert response == b'Hello World\n'
     finally:
         arbiter.stop()
