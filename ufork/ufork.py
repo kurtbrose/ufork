@@ -16,6 +16,10 @@ from collections import deque, namedtuple
 from logging.handlers import SysLogHandler
 from multiprocessing import cpu_count
 from random import seed  # re-seed random number generator post-fork
+try:
+    import readline
+except:
+    readline = None
 
 TIMEOUT = 10.0
 # grace period before timeout is applied for post_fork initialization
@@ -514,6 +518,8 @@ class StdinHandler(object):
     def _interact(self):
         sys.stdout.flush()
         time.sleep(1.0)
+        if readline:
+            readline.parse_and_bind("tab: complete")
         print('')  # newline on startup to clear prompt
         while not self.stopping:
             try:
