@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 
-import sys
 import time
 import threading
 from wsgiref.simple_server import make_server
@@ -44,10 +43,7 @@ def test_wsgiref_hello():
     time.sleep(3)  # Todo: Find another way to wait until server is ready to accept requests.
     try:
         response = urlopen('http://{}:{}'.format(SERVER_HOST, SERVER_PORT)).read()
-        if sys.version_info[0] == 3:
-            assert response == b'Hello World\n'
-        else:
-            assert response == 'Hello World\n'
+        assert response == b'Hello World\n'
     finally:
         arbiter.stop()
         arbiter.thread.join()
