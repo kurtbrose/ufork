@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="ufork",
-    version="20.11.0",
+    version="20.11.1dev",
     author="Kurt Rose",
     author_email="kurt@kurtrose.com",
     description="A simple pre-forking server container.",
@@ -35,12 +35,12 @@ A brief checklist for release:
 * rm -rf dist/*
 * python setup.py sdist bdist_wheel
 * twine upload dist/*
-* bump docs/conf.py version
+* bump docs/conf.py version (TODO)
 * git commit
 * git tag -a vx.y.z -m "brief summary"
-* write CHANGELOG
+* write CHANGELOG (TODO)
 * git commit
-* bump glom/_version.py onto n+1 dev
+* bump version onto n+1 dev
 * git commit
 * git push
 
