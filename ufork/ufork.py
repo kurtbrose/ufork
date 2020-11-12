@@ -129,8 +129,12 @@ class Worker(object):
             pass
         else:
             self.last_update = time.time()
+            try:
+                data = data.decode(sys.stdout.encoding)
+            except UnicodeError:
+                data = repr(data)
             if data:
-                self.arbiter.printfunc(str(self.pid) + ':' + repr(data))
+                self.arbiter.printfunc(str(self.pid) + ': ' + data.rstrip('\n'))
 
     def parent_check(self):
         try:
@@ -151,7 +155,7 @@ class Worker(object):
         elif time.time() - self.last_update > TIMEOUT:
             timeout = True
         if timeout:
-            self.arbiter.printfunc("worker timed out" + str(self.pid))
+            self.arbiter.printfunc("worker timed out " + str(self.pid))
             self.arbiter.timed_out_children += 1
             total_children, timed_out_children, last_logged_child_issue = \
                 self.arbiter.total_children, self.arbiter.timed_out_children, self.arbiter.last_logged_child_issue
@@ -161,7 +165,6 @@ class Worker(object):
                 self.arbiter.printfunc("Most children are wedging!  {0} time outs, {1} total".format(
                     timed_out_children, total_children))
             self.parent_kill()
-            print('returning false for', self.pid)
             return False
         return True
 
@@ -189,7 +192,8 @@ class Worker(object):
         self.sock.sendall(data)
 
     def __repr__(self):
-        return "ufork.Worker<pid=" + str(self.pid) + ">"
+        cn = self.__class__.__name__
+        return "<%s pid=%s>" % (cn, self.pid)
 
 
 def cur_worker_id():
@@ -376,6 +380,7 @@ class Arbiter(object):
         while self.workers and time.time() < shutdown_time + TIMEOUT:
             self._cull_workers()
             self._reap()
+            self.printfunc("waiting for %s workers to shutdown..." % len(self.workers))
             time.sleep(1.0)
         # if workers have not shut down cleanly by now, kill them
         for w in list(self.workers.values()):
@@ -400,8 +405,9 @@ class Arbiter(object):
                 self.dead_workers.append(DeadWorker(res[0], res[1], name))
                 res = os.waitpid(-1, os.WNOHANG)
         except OSError as e:
-            if getattr(e, "errno", None) == 10:  # errno 10 is "no child processes"
-                self.printfunc("all workers dead")
+            if getattr(e, "errno", None) == 10:
+                # errno 10 is "no child processes", waitpid had no info for us
+                pass
             else:
                 self.printfunc("reap caught exception" + repr(e))
 
