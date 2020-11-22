@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="ufork",
-    version="20.11.1",
+    version="20.11.2dev",
     author="Kurt Rose",
     author_email="kurt@kurtrose.com",
     description="A simple pre-forking server container.",
