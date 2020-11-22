@@ -27,6 +27,8 @@ TIMEOUT = 10.0
 CHILD_START_TIMEOUT = 10 * 60.0
 CUR_WORKER = None
 
+STDOUT_ENCODING = sys.stdout.encoding or 'utf-8'
+
 
 class Worker(object):
     def __init__(self, arbiter, index):
@@ -130,7 +132,7 @@ class Worker(object):
         else:
             self.last_update = time.time()
             try:
-                data = data.decode(sys.stdout.encoding)
+                data = data.decode(STDOUT_ENCODING)
             except UnicodeError:
                 data = repr(data)
             if data:
@@ -356,7 +358,7 @@ class Arbiter(object):
         except Exception:
             self.printfunc('arbiter loop exiting due to: ' + traceback.format_exc())
         else:
-            self.printfunc('aribter loop exiting without exception, self.stopping=' + repr(self.stopping))
+            self.printfunc('arbiter loop exiting without exception, self.stopping=' + repr(self.stopping))
         finally:
             if not self.in_child:  # just let child SystemExit raise
                 try:
